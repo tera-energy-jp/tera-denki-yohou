@@ -7,7 +7,7 @@ name: でんき予報 デイリー生成（半自動）
 #  - 手動実行（Actions画面の Run workflow）
 on:
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '40 1 * * *'
   push:
     paths:
       - 'data/spot_summary.csv'
