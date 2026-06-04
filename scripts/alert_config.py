@@ -22,6 +22,27 @@ THRESHOLDS = {
     "九州":   36,
 }
 
+# でんき予報 表示用の5段階レベル（判定＝その日の「日内最高値」・円/kWh）
+# ※ 絶対的な価格水準ベース。メールアラート用の THRESHOLDS（上）とは別物。
+PRICE_LEVELS = [
+    # (この値未満なら該当, ラベル, 色)。最後の None は「それ以上すべて」
+    (10,   "とてもおだやか", "#5A9E2F"),  # 〜10円
+    (15,   "おだやか",       "#8FB23A"),  # 10〜15円
+    (20,   "ふつう",         "#E1AF00"),  # 15〜20円
+    (35,   "高め",           "#EE8B1F"),  # 20〜35円
+    (None, "とても高め",     "#C0531E"),  # 35円〜
+]
+
+
+def price_level(peak):
+    """日内最高値(円/kWh) → (レベル番号1-5, ラベル, 色) を返す。"""
+    for i, (upper, label, color) in enumerate(PRICE_LEVELS, 1):
+        if upper is None or peak < upper:
+            return i, label, color
+    last = PRICE_LEVELS[-1]
+    return len(PRICE_LEVELS), last[1], last[2]
+
+
 # 毎日便りメールを「希望する」お客様の購読エリア（CIS連携前の暫定。
 # 実運用では購読者管理から動的に取得する）。空なら全エリアぶんを生成。
 DAILY_SUBSCRIBE_AREAS = []  # 例: ["関西", "東京"]

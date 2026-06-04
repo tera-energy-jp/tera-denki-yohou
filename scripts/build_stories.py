@@ -10,7 +10,7 @@ import json
 import os
 import random
 import sys
-from alert_config import THRESHOLDS
+from alert_config import THRESHOLDS, PRICE_LEVELS, price_level
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRICES_JSON = "prices.json"
@@ -114,7 +114,8 @@ def legend_html(series):
     for idx, (area, arr) in enumerate(series.items()):
         c = LINE_COLORS[idx % len(LINE_COLORS)]
         hi = max(arr)
-        tag = '<span class="hot">高め</span>' if hi > THRESHOLDS.get(area, 40) else ""
+        lv, label, lvcolor = price_level(hi)
+        tag = f'<span class="lvl" style="background:{lvcolor}">{label}</span>'
         out.append(f'<span class="lg"><span class="dot" style="background:{c}"></span>{area}'
                    f'<span class="lgv">最高 {hi:.0f}円</span>{tag}</span>')
     return "".join(out)
@@ -135,22 +136,25 @@ CLOUD = ('<svg class="cloud" viewBox="0 0 320 200" xmlns="http://www.w3.org/2000
 
 
 def national_summary(areas):
-    n = sum(1 for a, arr in areas.items() if max(arr) > THRESHOLDS.get(a, 40))
+    peaks = [max(arr) for arr in areas.values()]
+    rep = sum(peaks) / len(peaks)         # 9エリアの日内最高値の平均
+    lv, mood, color = price_level(rep)    # 5段階のラベル・色
     cheapest = min(areas, key=lambda a: min(areas[a]))
     carr = areas[cheapest]
     lo_i = carr.index(min(carr))
-    hot = [a for a in areas if max(areas[a]) > THRESHOLDS.get(a, 40)]
-    if n == 0:
-        pre, mood, color = "あしたは、", "全国的に おだやか", "#5A9E2F"
-        hot_line = '<span class="ok">&#9728; 高すぎる時間は無さそう。安心して使えるゾウ</span>'
-    elif n <= 3:
-        pre, mood, color = "あしたは、", "一部エリアで 高め", "#EE8B1F"
-        hot_line = f'<span class="warn">&#9650; 高めにご注意</span>　{"・".join(hot)}'
+    # 段階4以上（＝20円以上「高め」）のエリアを注意対象として列挙
+    hot = [a for a in areas if max(areas[a]) >= 20]
+    if not hot:
+        if lv <= 2:
+            hot_line = '<span class="ok">&#9728; 高すぎる時間は無さそう。安心して使えるゾウ</span>'
+        else:
+            hot_line = '<span class="ok">&#9728; ふつうの水準。時間を選べばお得に使えるゾウ</span>'
+    elif len(hot) >= 5:
+        hot_line = '<span class="warn">&#9650; 広い範囲で 高めの時間に注意</span>'
     else:
-        pre, mood, color = "あしたは、", "広い範囲で 高め", "#C0531E"
-        hot_line = f'<span class="warn">&#9650; 高めにご注意</span>　{"・".join(hot)}'
+        hot_line = f'<span class="warn">&#9650; 高めの時間に注意</span>　{"・".join(hot)}'
     return {
-        "pre": pre, "mood": mood, "color": color,
+        "pre": "あしたは、", "mood": mood, "color": color,
         "cheap_area": cheapest, "cheap_time": slot_label(lo_i), "cheap_val": f"{min(carr):.0f}",
         "hot_line": hot_line,
     }
@@ -251,7 +255,7 @@ PAGE = '''<!DOCTYPE html>
   .lg{{display:flex;align-items:center;gap:11px;font-size:32px;font-weight:500;color:#573C2C;}}
   .lg .dot{{width:24px;height:24px;border-radius:50%;}}
   .lg .lgv{{font-size:26px;color:#9b8e7c;margin-left:4px;font-weight:400;}}
-  .lg .hot{{font-size:24px;color:#fff;background:#EE7C2B;padding:4px 16px;border-radius:16px;margin-left:7px;font-weight:700;}}
+  .lg .lvl{{font-size:24px;color:#fff;padding:4px 16px;border-radius:16px;margin-left:7px;font-weight:700;}}
   .tip{{border-radius:26px;padding:26px 32px;margin-top:24px;}}
   .tip .tt{{display:block;font-size:31px;font-weight:700;margin-bottom:9px;}}
   .tip .tb{{display:block;font-size:30px;line-height:1.62;color:#5c5346;font-weight:400;}}
