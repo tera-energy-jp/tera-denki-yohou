@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>テラゾウの でんき予報 ｜ エリア別</title>
+<style>
+  :root{
+    --bg:#FAFAF8; --card-bg:#F5F0E9; --ink:#4A4440; --muted:#9b8e7c;
+    --yellow:#FAE14B; --amber:#E1AF00; --blue:#6496C8; --grid:#e3dccd;
+    --lo:#185FA5; --hi:#993C1D; --line:#3A6FA5;
+    --fill-lo:#E3EEF8; --fill-hi:#F7E7DF;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink); padding:18px 14px 48px;
+    font-family:system-ui,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+  }
+  .wrap{max-width:480px; margin:0 auto;}
+  .head{display:flex; align-items:center; gap:8px; margin-bottom:4px;}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--yellow);display:flex;align-items:center;justify-content:center;color:var(--amber);font-size:17px;}
+  .head h1{font-size:18px; font-weight:600; margin:0;}
+  .head .sub{font-size:12px; color:var(--muted);}
+  .date{font-size:13px; color:#6b5a00; margin:2px 0 14px; font-weight:500;}
+
+  .selector{margin-bottom:14px;}
+  .sel-label{font-size:12px; color:var(--muted); margin-bottom:7px;}
+  .pills{display:flex; flex-wrap:wrap; gap:7px;}
+  .pill{
+    border:1.5px solid #e1d8c7; background:#fff; color:#6b5f54;
+    font-size:13px; font-weight:500; padding:7px 13px; border-radius:20px;
+    cursor:pointer; transition:.15s; font-family:inherit;
+  }
+  .pill:hover{border-color:var(--amber);}
+  .pill.active{background:var(--amber); border-color:var(--amber); color:#fff;}
+
+  .panel{background:var(--card-bg); border-radius:18px; padding:16px 16px 6px; margin-bottom:14px;}
+  .panel-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px;}
+  .panel-area{font-size:20px; font-weight:600;}
+  .panel-tag{font-size:11px; color:#6b5a00; background:#fff; padding:3px 10px; border-radius:11px; font-weight:500;}
+  .chart{width:100%; height:auto; display:block;}
+
+  .stats{display:flex; gap:10px; margin:10px 0 4px;}
+  .stat{flex:1; border-radius:12px; padding:9px 12px;}
+  .stat.lo{background:var(--fill-lo);} .stat.hi{background:var(--fill-hi);}
+  .stat .t{font-size:11px; font-weight:600; margin-bottom:2px;}
+  .stat.lo .t{color:var(--lo);} .stat.hi .t{color:var(--hi);}
+  .stat .v{font-size:15px; font-weight:600;}
+  .stat .v small{font-size:11px; font-weight:500; color:var(--muted);}
+
+  .tip{border-radius:12px; padding:11px 13px; margin-bottom:10px;}
+  .tip-good{background:#EAF2F9;}
+  .tip-good .tt{font-size:12.5px;font-weight:600;color:var(--lo);margin-bottom:4px;}
+  .tip-good .tb{font-size:12.5px;line-height:1.6;color:#2f4a63;}
+  .tip-why{background:#fff;}
+  .tip-why .tt{font-size:11px;font-weight:600;color:var(--amber);margin-bottom:3px;}
+  .tip-why .tb{font-size:12.5px;line-height:1.65;color:var(--ink);}
+
+  .note{font-size:11px; color:var(--muted); line-height:1.6; text-align:center; margin-top:14px;}
+  .loading{text-align:center; color:var(--muted); font-size:13px; padding:40px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="avatar">&#9733;</div>
+    <div>
+      <h1>テラゾウの でんき予報</h1>
+      <div class="sub">エリア別・市場価格（エリアプライス）</div>
+    </div>
+  </div>
+  <div class="date" id="date"></div>
+
+  <div id="loading" class="loading">データを読み込んでいます…</div>
+
+  <div id="content" style="display:none;">
+    <div class="selector">
+      <div class="sel-label">お住まいのエリアを選んでください</div>
+      <div class="pills" id="pills"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-area" id="p-area"></span>
+        <span class="panel-tag">エリアプライス</span>
+      </div>
+      <div id="p-chart"></div>
+      <div class="stats">
+        <div class="stat lo"><div class="t">&#9660; いちばん安い</div><div class="v" id="p-lo"></div></div>
+        <div class="stat hi"><div class="t">&#9650; いちばん高い</div><div class="v" id="p-hi"></div></div>
+      </div>
+    </div>
+
+    <div class="tip tip-good">
+      <div class="tt">&#9786; お得な狙い目</div>
+      <div class="tb" id="p-action"></div>
+    </div>
+    <div class="tip tip-why">
+      <div class="tt">なんで時間で変わるの？</div>
+      <div class="tb" id="p-why"></div>
+    </div>
+
+    <div class="note">市場価格（JEPXエリアプライス）の目安です。実際の電気料金には託送料金やTERAの手数料などが加わります。</div>
+  </div>
+</div>
+
+<script>
+const AREA_COPY = {
+  east:{ action:"早朝と深夜が安めの日が多めです。洗濯・食洗機・炊飯予約・EV充電をこの時間に寄せると◎ゾウ",
+         why:"日中は冷暖房などで電気を使う人が増えて価格が上がるゾウ。早朝や深夜はみんなが休んでいて需要が落ち着くから狙い目ゾウ！" },
+  solar:{ action:"晴れた日のお昼が大チャンス。洗濯・食洗機・お湯わかし・EV充電をお昼に寄せると◎ゾウ",
+          why:"太陽光発電が多い地域は、晴れたお昼に電気があり余って価格がぐっと下がるゾウ。夕方は太陽が沈んで需要も残るから高くなりやすいゾウ！" },
+  mid:{ action:"朝〜午前と深夜が狙い目。洗濯・食洗機・炊飯予約・EV充電をこの時間に寄せると◎ゾウ",
+        why:"晴れたお昼は太陽光で価格が下がることがあるゾウ。逆に夕方は仕事や家事が重なって需要が集まり、高くなりやすいゾウ！" },
+};
+const COPY_MAP = {
+  "北海道":"east","東北":"east","東京":"east",
+  "中部":"mid","北陸":"mid","関西":"mid",
+  "中国":"solar","四国":"solar","九州":"solar",
+};
+
+let DATA = null;
+let AREAS = [];
+let current = "関西";
+
+function slotToTime(i){ return Math.floor(i/2)+":"+(i%2?"30":"00"); }
+
+function chart(prices){
+  const W=440,H=210,L=34,R=12,T=14,B=26;
+  const plotW=W-L-R, plotH=H-T-B;
+  const yMax=Math.max(40, Math.ceil(Math.max(...prices)/10)*10);
+  const x=i=>L+(i/47)*plotW;
+  const y=p=>T+(1-p/yMax)*plotH;
+  const minI=prices.indexOf(Math.min(...prices));
+  const maxI=prices.indexOf(Math.max(...prices));
+
+  let grid="";
+  for(let v=0;v<=yMax;v+=10){
+    const yy=y(v);
+    grid+=`<line x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+    grid+=`<text x="${L-5}" y="${yy+3.5}" text-anchor="end" font-size="10" fill="var(--muted)">${v}</text>`;
+  }
+  let xlab="";
+  for(let h=0;h<=24;h+=3){
+    const xx=L+(h/24)*plotW;
+    grid+=`<line x1="${xx}" y1="${T}" x2="${xx}" y2="${T+plotH}" stroke="var(--grid)" stroke-width="${h%6===0?1:0.5}"/>`;
+    if(h%6===0) xlab+=`<text x="${xx}" y="${H-8}" text-anchor="middle" font-size="10" fill="var(--muted)">${h}時</text>`;
+  }
+  const bandLo=`<rect x="${x(Math.max(0,minI-1))}" y="${T}" width="${x(minI+1)-x(Math.max(0,minI-1))}" height="${plotH}" fill="var(--fill-lo)" opacity="0.7"/>`;
+  const bandHi=`<rect x="${x(Math.max(0,maxI-1))}" y="${T}" width="${x(maxI+1)-x(Math.max(0,maxI-1))}" height="${plotH}" fill="var(--fill-hi)" opacity="0.7"/>`;
+  const linePts=prices.map((p,i)=>x(i).toFixed(1)+","+y(p).toFixed(1)).join(" ");
+  const areaPts=`${L},${T+plotH} `+linePts+` ${W-R},${T+plotH}`;
+
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}">
+    ${bandLo}${bandHi}${grid}${xlab}
+    <polygon points="${areaPts}" fill="var(--line)" opacity="0.07"/>
+    <polyline points="${linePts}" fill="none" stroke="var(--line)" stroke-width="2.4" stroke-linejoin="round"/>
+    <circle cx="${x(minI)}" cy="${y(prices[minI])}" r="4.5" fill="var(--lo)"/>
+    <circle cx="${x(maxI)}" cy="${y(prices[maxI])}" r="4.5" fill="var(--hi)"/>
+    <text x="${x(minI)}" y="${y(prices[minI])+16}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--lo)">最安</text>
+    <text x="${x(maxI)}" y="${y(prices[maxI])-9}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--hi)">最高</text>
+  </svg>`;
+}
+
+function render(){
+  const pr=DATA.areas[current];
+  const minI=pr.indexOf(Math.min(...pr));
+  const maxI=pr.indexOf(Math.max(...pr));
+  document.getElementById("p-area").textContent = current+"エリア";
+  document.getElementById("p-chart").innerHTML = chart(pr);
+  document.getElementById("p-lo").innerHTML = slotToTime(minI)+" <small>ごろ</small>";
+  document.getElementById("p-hi").innerHTML = slotToTime(maxI)+" <small>ごろ</small>";
+  const copy = AREA_COPY[COPY_MAP[current]];
+  document.getElementById("p-action").textContent = copy.action;
+  document.getElementById("p-why").textContent = copy.why;
+  document.querySelectorAll(".pill").forEach(b=>b.classList.toggle("active", b.dataset.area===current));
+}
+
+function buildPills(){
+  const pills=document.getElementById("pills");
+  pills.innerHTML="";
+  AREAS.forEach(a=>{
+    const b=document.createElement("button");
+    b.className="pill"; b.textContent=a; b.dataset.area=a;
+    b.onclick=()=>{ current=a; render(); };
+    pills.appendChild(b);
+  });
+}
+
+async function init(){
+  try{
+    const res = await fetch("prices.json?_="+Date.now());  // キャッシュ回避
+    if(!res.ok) throw new Error("prices.json の取得に失敗しました");
+    DATA = await res.json();
+    AREAS = Object.keys(DATA.areas);
+    if(!AREAS.includes(current)) current = AREAS[0];
+    document.getElementById("date").textContent = DATA.date_label;
+    buildPills();
+    render();
+    document.getElementById("loading").style.display="none";
+    document.getElementById("content").style.display="block";
+  }catch(e){
+    document.getElementById("loading").textContent = "データを読み込めませんでした。しばらくしてから再度お試しください。";
+  }
+}
+init();
+</script>
+</body>
+</html>
