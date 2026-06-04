@@ -143,7 +143,7 @@ def national_summary(areas):
     carr = areas[cheapest]
     lo_i = carr.index(min(carr))
     # 段階4以上（＝20円以上「高め」）のエリアを注意対象として列挙
-    hot = [a for a in areas if max(areas[a]) >= 20]
+    hot = [a for a in areas if max(areas[a]) >= 17]
     if not hot:
         if lv <= 2:
             hot_line = '<span class="ok">&#9728; 高すぎる時間は無さそう。安心して使えるゾウ</span>'
