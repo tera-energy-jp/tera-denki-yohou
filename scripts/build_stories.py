@@ -226,13 +226,13 @@ PAGE = '''<!DOCTYPE html>
   .sheader{{display:flex;align-items:center;gap:18px;margin-bottom:14px;}}
   .szou{{width:120px;height:60px;flex:0 0 auto;}}
   .st1{{font-size:30px;font-weight:700;color:#573C2C;}}
-  .st2{{font-size:24px;color:#9b8e7c;font-weight:300;margin-top:2px;letter-spacing:.03em;}}
+  .st2{{font-size:34px;color:#F28C22;font-weight:800;margin-top:2px;letter-spacing:.03em;}}
 
   .cover .pad{{justify-content:space-between;}}
   .cover .czou{{width:380px;height:auto;margin-top:14px;}}
   .cover .ct1{{font-size:48px;font-weight:900;margin-top:24px;color:#573C2C;}}
   .cover .ct2{{font-size:26px;color:#9b8e7c;font-weight:400;margin-top:8px;}}
-  .cover .date{{font-size:30px;color:#9b8e7c;font-weight:300;margin-top:30px;letter-spacing:.04em;}}
+  .cover .date{{font-size:48px;color:#573C2C;font-weight:700;margin-top:30px;letter-spacing:.04em;}}
   .mood .pre{{font-size:50px;color:#9b8e7c;font-weight:300;}}
   .mood .big{{font-size:96px;font-weight:900;line-height:1.26;}}
   .summary{{margin-top:30px;background:#fff;border-radius:28px;padding:30px 34px;box-shadow:0 8px 30px rgba(243,154,43,.10);}}
