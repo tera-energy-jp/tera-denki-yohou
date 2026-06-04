@@ -38,6 +38,8 @@
   .panel-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px;}
   .panel-area{font-size:20px; font-weight:600;}
   .panel-tag{font-size:11px; color:#6b5a00; background:#fff; padding:3px 10px; border-radius:11px; font-weight:500;}
+  .panel-level{font-size:13px; color:#fff; padding:4px 13px; border-radius:13px; font-weight:600;}
+  .panel-level small{font-weight:400; font-size:11px; opacity:.9; margin-left:3px;}
   .chart{width:100%; height:auto; display:block;}
 
   .stats{display:flex; gap:10px; margin:10px 0 4px;}
@@ -82,7 +84,7 @@
     <div class="panel">
       <div class="panel-head">
         <span class="panel-area" id="p-area"></span>
-        <span class="panel-tag">エリアプライス</span>
+        <span class="panel-level" id="p-level"></span>
       </div>
       <div id="p-chart"></div>
       <div class="stats">
@@ -122,6 +124,15 @@ const COPY_MAP = {
 let DATA = null;
 let AREAS = [];
 let current = "関西";
+
+const LEVELS = [
+  {max:10,       label:"とてもおだやか", color:"#5A9E2F"},
+  {max:15,       label:"おだやか",       color:"#8FB23A"},
+  {max:20,       label:"ふつう",         color:"#E1AF00"},
+  {max:35,       label:"高め",           color:"#EE8B1F"},
+  {max:Infinity, label:"とても高め",     color:"#C0531E"},
+];
+function priceLevel(peak){ return LEVELS.find(l => peak < l.max); }
 
 function slotToTime(i){ return Math.floor(i/2)+":"+(i%2?"30":"00"); }
 
@@ -170,6 +181,11 @@ function render(){
   document.getElementById("p-chart").innerHTML = chart(pr);
   document.getElementById("p-lo").innerHTML = slotToTime(minI)+" <small>ごろ</small>";
   document.getElementById("p-hi").innerHTML = slotToTime(maxI)+" <small>ごろ</small>";
+  const hiVal = Math.max(...pr);
+  const lv = priceLevel(hiVal);
+  const lvEl = document.getElementById("p-level");
+  lvEl.innerHTML = lv.label + ' <small>最高'+Math.round(hiVal)+'円</small>';
+  lvEl.style.background = lv.color;
   const copy = AREA_COPY[COPY_MAP[current]];
   document.getElementById("p-action").textContent = copy.action;
   document.getElementById("p-why").textContent = copy.why;
