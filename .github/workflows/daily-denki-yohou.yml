@@ -1,9 +1,8 @@
-name: でんき予報 デイリー生成（半自動）
+name: でんき予報 デイリー生成（自動）
 
 # 起動タイミング：
-#  - 毎晩 18:00 JST（= 09:00 UTC）。翌日エリアプライス確定後の想定。
-#    JEPX/CISの確定時刻に合わせて cron を調整してください。
-#  - data/spot_summary.csv を更新push したとき（CIS連携 or 手動差し替え）
+#  - 毎朝 10:40 JST（= 01:40 UTC）。JEPXのスポット価格公表（10:30頃）の直後。
+#  - data/spot_summary.csv を更新push したとき（手動差し替え時のフォールバック）
 #  - 手動実行（Actions画面の Run workflow）
 on:
   schedule:
@@ -32,6 +31,9 @@ jobs:
         run: |
           pip install playwright
           playwright install --with-deps chromium
+
+      - name: ⓪ JEPXから最新CSVを取得
+        run: python scripts/fetch_jepx.py
 
       - name: ① prices.json を生成
         run: python scripts/build_prices.py
