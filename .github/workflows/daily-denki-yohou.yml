@@ -1,12 +1,15 @@
 name: でんき予報 デイリー生成（自動）
 
 # 起動タイミング：
-#  - 毎朝 10:40 JST（= 01:40 UTC）。JEPXのスポット価格公表（10:30頃）の直後。
+#  - 毎朝 10:40 / 11:10 / 11:40 JST の3回（GitHubの遅延対策で複数仕掛ける）。
+#    当日まだ配信していなければ最初の1回だけ実処理し、残りはスキップ（重複防止）。
 #  - data/spot_summary.csv を更新push したとき（手動差し替え時のフォールバック）
-#  - 手動実行（Actions画面の Run workflow）
+#  - 手動実行（Run workflow）は常に実行（ガード無視）
 on:
   schedule:
-    - cron: '40 1 * * *'
+    - cron: '40 1 * * *'   # 10:40 JST
+    - cron: '10 2 * * *'   # 11:10 JST
+    - cron: '40 2 * * *'   # 11:40 JST
   push:
     paths:
       - 'data/spot_summary.csv'
@@ -16,7 +19,28 @@ permissions:
   contents: write   # 生成したPNG/JSONを docs/ にコミットするため
 
 jobs:
+  # 当日すでに配信済みかを判定（複数cronの重複実行を防ぐ）
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          TODAY=$(TZ=Asia/Tokyo date +%Y-%m-%d)
+          if [ -f docs/.last_run ] && [ "$(cat docs/.last_run)" = "$TODAY" ]; then
+            echo "本日（$TODAY）は配信済み。スキップします。"
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "本日（$TODAY）は未配信。実行します。"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-notify:
+    needs: guard
+    # 自動実行は「当日未配信」のときだけ。手動実行は常に実行。
+    if: needs.guard.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: チェックアウト
@@ -50,12 +74,15 @@ jobs:
           cp stories_*.png docs/stories/
           cp prices.json   docs/prices.json
 
+      - name: 当日の配信日を記録（重複防止マーカー）
+        run: TZ=Asia/Tokyo date +%Y-%m-%d > docs/.last_run
+
       - name: ⑤ コミット＆プッシュ（GitHub Pages 公開）
         run: |
           git config user.name  "tera-denki-bot"
           git config user.email "bot@users.noreply.github.com"
           git add docs/
-          git commit -m "でんき予報 $(date -u +%Y-%m-%d)" || echo "変更なし（スキップ）"
+          git commit -m "でんき予報 $(TZ=Asia/Tokyo date +%Y-%m-%d)" || echo "変更なし（スキップ）"
           git push
 
       - name: Pages 反映待ち
