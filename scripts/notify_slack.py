@@ -19,7 +19,7 @@ import os
 import sys
 import urllib.request
 
-from alert_config import THRESHOLDS
+from alert_config import price_level
 
 
 def slot_label(i):
@@ -32,18 +32,24 @@ def main():
     areas = data["areas"]
     date_label = data["date_label"]
 
+    peaks = [max(arr) for arr in areas.values()]
+    rep = sum(peaks) / len(peaks)              # 9エリアの日内最高値の平均
+    lv, mood_label, _ = price_level(rep)       # 5段階（表紙と同じ判定）
     cheapest = min(areas, key=lambda a: min(areas[a]))
     carr = areas[cheapest]
     lo_i = carr.index(min(carr))
-    hot = [a for a in areas if max(areas[a]) > THRESHOLDS.get(a, 40)]
+    hot = [a for a in areas if max(areas[a]) >= 17]   # 段階4以上（高め）のエリア
 
-    if hot:
-        mood = f"⚠ 高めにご注意：{'・'.join(hot)}"
+    if not hot:
+        note = "🌿 高すぎる時間は無さそう。安心して使えるゾウ" if lv <= 2 else "🌿 ふつうの水準。時間を選べばお得に使えるゾウ"
+    elif len(hot) >= 5:
+        note = "⚠ 広い範囲で 高めの時間に注意"
     else:
-        mood = "🌿 高すぎる時間は無さそう。おだやかな一日です"
+        note = f"⚠ 高めの時間に注意：{'・'.join(hot)}"
 
-    summary = (f"*いちばんおだやか*：{cheapest}・{slot_label(lo_i)}ごろ"
-               f"（約{min(carr):.0f}円/kWh）\n{mood}")
+    summary = (f"あしたは *{mood_label}*\n"
+               f"*いちばんおだやか*：{cheapest}・{slot_label(lo_i)}ごろ"
+               f"（約{min(carr):.0f}円/kWh）\n{note}")
 
     base = os.environ.get("PAGES_BASE_URL", "").rstrip("/")
     ver = data["date_raw"].replace("/", "")  # キャッシュ回避用
