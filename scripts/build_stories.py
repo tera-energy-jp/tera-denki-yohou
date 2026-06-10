@@ -267,7 +267,7 @@ PAGE = '''<!DOCTYPE html>
   .closing .msg{{font-size:74px;font-weight:900;color:#573C2C;line-height:1.5;}}
   .closing .msg em{{color:#F39A2B;font-style:normal;}}
   .closing .lead{{font-size:34px;color:#7a6f5f;line-height:1.9;margin-top:34px;font-weight:300;}}
-  .linkcue{{display:inline-flex;align-items:center;gap:16px;background:#F39A2B;color:#fff;font-size:34px;font-weight:700;padding:28px 42px;border-radius:54px;}}
+  .linkcue{{display:inline-flex;align-items:center;gap:16px;background:#F39A2B;color:#fff;font-size:31px;font-weight:700;padding:28px 42px;border-radius:54px;}}
   .footnote{{font-size:23px;color:#b3a892;line-height:1.7;font-weight:300;margin-top:30px;}}
 </style></head>
 <body>
@@ -304,7 +304,7 @@ PAGE = '''<!DOCTYPE html>
         <div class="lead">電気は、ただのエネルギーじゃない。<br>いつ使うかを自分で選べることが、<br>おだやかな安心につながりますように。</div>
       </div>
       <div>
-        <span class="linkcue"><span>&#128279;</span>各エリアの予報は リンクから確認できるゾウ</span>
+        <span class="linkcue"><span>&#128279;</span>各エリアの予報は プロフィールのリンクから確認できるゾウ</span>
         <div class="footnote">※市場価格（JEPXエリアプライス）のめやすです。実際の電気料金には託送料金やTERAの手数料などが加わります。</div>
       </div>
     </div>
