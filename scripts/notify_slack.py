@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-でんき予報 Slack通知
+でんき予報 Slack通知（軽量版・自動投稿後の安否確認用）
 --------------------
-prices.json を読み、その日のサマリ（最安/高め）と
-GitHub Pages 上の5枚のストーリーズPNGを Slack に通知する。
+prices.json を読み、その日のサマリ（最安/高め）を Slack に短く通知する。
+画像は載せず、Web版へのリンクを添える。
+（Instagram Storiesへの投稿はワークフローが自動で行うため、手動投稿の案内は廃止）
 
 環境変数:
   SLACK_WEBHOOK_URL  Slack Incoming Webhook の URL（GitHub Secrets）
   PAGES_BASE_URL     公開先のベースURL 例 https://OWNER.github.io/REPO（GitHub Variables）
-
 使い方:
   python scripts/notify_slack.py            # prices.json を読む
   python scripts/notify_slack.py prices.json
@@ -18,7 +18,6 @@ import json
 import os
 import sys
 import urllib.request
-
 from alert_config import price_level
 
 
@@ -39,7 +38,6 @@ def main():
     carr = areas[cheapest]
     lo_i = carr.index(min(carr))
     hot = [a for a in areas if max(areas[a]) >= 17]   # 段階4以上（高め）のエリア
-
     if not hot:
         note = "🌿 高すぎる時間は無さそう。安心して使えるゾウ" if lv <= 2 else "🌿 ふつうの水準。時間を選べばお得に使えるゾウ"
     elif len(hot) >= 5:
@@ -52,29 +50,24 @@ def main():
                f"（約{min(carr):.0f}円/kWh）\n{note}")
 
     base = os.environ.get("PAGES_BASE_URL", "").rstrip("/")
-    ver = data["date_raw"].replace("/", "")  # キャッシュ回避用
-    imgs = [f"{base}/stories/stories_{i}.png?v={ver}" for i in range(1, 6)]
+    link_line = "✅ Web・Instagram Storiesに自動投稿しました"
+    if base:
+        link_line += f"｜<{base}|Web版を見る>"
 
+    # 軽量化：画像5枚は載せず、サマリ＋完了リンクだけ
     blocks = [
         {"type": "header",
-         "text": {"type": "plain_text", "text": f"☀ 今日のでんき予報ができたゾウ（{date_label}）"}},
+         "text": {"type": "plain_text", "text": f"☀ でんき予報 配信完了（{date_label}）"}},
         {"type": "section", "text": {"type": "mrkdwn", "text": summary}},
-        {"type": "divider"},
+        {"type": "context", "elements": [
+            {"type": "mrkdwn", "text": link_line}]},
     ]
-    for i, u in enumerate(imgs, 1):
-        labels = ["表紙", "東日本編", "中日本編", "西日本編", "締め"]
-        blocks.append({"type": "image", "image_url": u,
-                       "alt_text": labels[i - 1], "title": {"type": "plain_text", "text": f"{i}. {labels[i-1]}"}})
-    blocks.append({"type": "context", "elements": [
-        {"type": "mrkdwn",
-         "text": "確認して、Instagramストーリーズに 1→5 の順で投稿してね（最後にWeb版へのリンクスタンプも忘れずに）。"}]})
 
     webhook = os.environ.get("SLACK_WEBHOOK_URL")
     if not webhook:
         print("SLACK_WEBHOOK_URL が未設定です（ローカル確認時はスキップ）。\n--- 送信予定の内容 ---")
         print(summary)
-        for u in imgs:
-            print(u)
+        print(link_line)
         return
 
     payload = json.dumps({"blocks": blocks}).encode("utf-8")
