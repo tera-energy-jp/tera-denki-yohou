@@ -1,10 +1,10 @@
 name: でんき予報 デイリー生成（自動）
-
 # 起動タイミング：
 #  - 毎朝 10:40 / 11:10 / 11:40 JST の3回（GitHubの遅延対策で複数仕掛ける）。
 #    当日まだ配信していなければ最初の1回だけ実処理し、残りはスキップ（重複防止）。
 #  - data/spot_summary.csv を更新push したとき（手動差し替え時のフォールバック）
 #  - 手動実行（Run workflow）は常に実行（ガード無視）
+#  ※ 実運用の定時起動は cron-job.org からの workflow_dispatch を主役にしている。
 on:
   schedule:
     - cron: '40 1 * * *'   # 10:40 JST
@@ -14,10 +14,8 @@ on:
     paths:
       - 'data/spot_summary.csv'
   workflow_dispatch:
-
 permissions:
   contents: write   # 生成したPNG/JSONを docs/ にコミットするため
-
 jobs:
   # 当日すでに配信済みかを判定（複数cronの重複実行を防ぐ）
   guard:
@@ -36,7 +34,6 @@ jobs:
             echo "本日（$TODAY）は未配信。実行します。"
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           fi
-
   build-and-notify:
     needs: guard
     # 自動実行は「当日未配信」のときだけ。手動実行は常に実行。
@@ -45,38 +42,29 @@ jobs:
     steps:
       - name: チェックアウト
         uses: actions/checkout@v4
-
       - name: Python セットアップ
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: 依存インストール（Playwright + Chromium）
+      - name: 依存インストール（Playwright + Chromium + requests）
         run: |
-          pip install playwright
+          pip install playwright requests
           playwright install --with-deps chromium
-
       - name: ⓪ JEPXから最新CSVを取得
         run: python scripts/fetch_jepx.py
-
       - name: ① prices.json を生成
         run: python scripts/build_prices.py
-
       - name: ② stories.html を生成
         run: python scripts/build_stories.py
-
       - name: ③ PNG（5枚）を書き出し
         run: python scripts/render_png.py stories.html
-
       - name: ④ 公開ディレクトリ（docs/）へ配置
         run: |
           mkdir -p docs/stories
           cp stories_*.png docs/stories/
           cp prices.json   docs/prices.json
-
       - name: 当日の配信日を記録（重複防止マーカー）
         run: TZ=Asia/Tokyo date +%Y-%m-%d > docs/.last_run
-
       - name: ⑤ コミット＆プッシュ（GitHub Pages 公開）
         run: |
           git config user.name  "tera-denki-bot"
@@ -84,12 +72,16 @@ jobs:
           git add docs/
           git commit -m "でんき予報 $(TZ=Asia/Tokyo date +%Y-%m-%d)" || echo "変更なし（スキップ）"
           git push
-
       - name: Pages 反映待ち
         run: sleep 45
-
       - name: ⑥ Slack へ通知
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL }}
         run: python scripts/notify_slack.py
+      - name: ⑦ Instagram Stories へ投稿
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL }}
+        run: python scripts/post_instagram_stories.py
