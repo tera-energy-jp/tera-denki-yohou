@@ -17,6 +17,7 @@
 import os
 import sys
 import glob
+import json
 import time
 import requests
 
@@ -84,6 +85,20 @@ def publish(creation_id):
     return r.json()["id"]
 
 
+def cache_buster():
+    """画像URLに付けるバージョン文字列（その日の配信日付）。
+
+    PNGのファイル名が毎日同じなので、素のURLだと GitHub Pages や
+    Meta 側のCDNが前日の画像をキャッシュから返す恐れがある。
+    クエリを日替わりにすることで必ず最新を取りに行かせる。
+    """
+    try:
+        with open("prices.json", encoding="utf-8") as f:
+            return json.load(f)["date_raw"].replace("/", "")
+    except Exception:
+        return time.strftime("%Y%m%d%H%M")
+
+
 def main():
     # 投稿対象の画像（docs/stories/stories_1.png ... をファイル名順に）
     files = sorted(glob.glob("docs/stories/stories_*.png"))
@@ -91,10 +106,11 @@ def main():
         print("[エラー] 投稿する画像（docs/stories/stories_*.png）が見つかりません。", file=sys.stderr)
         sys.exit(1)
 
-    print(f"=== Instagram Stories 投稿開始（{len(files)}枚） ===")
+    ver = cache_buster()
+    print(f"=== Instagram Stories 投稿開始（{len(files)}枚 / v={ver}） ===")
     for i, path in enumerate(files, 1):
         name = os.path.basename(path)
-        image_url = f"{PAGES_BASE_URL}/stories/{name}"
+        image_url = f"{PAGES_BASE_URL}/stories/{name}?v={ver}"
         print(f"[{i}/{len(files)}] {name} → {image_url}")
 
         creation_id = create_container(image_url)

@@ -10,7 +10,7 @@ import json
 import os
 import random
 import sys
-from alert_config import THRESHOLDS, PRICE_LEVELS, price_level
+from alert_config import price_level, yen_approx, HIGH_FLOOR
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRICES_JSON = "prices.json"
@@ -22,6 +22,9 @@ GROUPS = [
     ("WEST JAPAN", "西日本", ["中国", "四国", "九州"]),
 ]
 LINE_COLORS = ["#6496C8", "#E1AF00", "#7A9A5A"]
+# 各線の線種（位置で割当）：1本目=実線 / 2本目=破線 / 3本目=点線。
+# 値が完全一致して重なっても線種で見分けられるようにするため。
+LINE_DASHES = ["", "16 10", "3 9"]
 
 # 「なんで時間で変わるの？」地域別の豆知識プール（日替わりでランダム表示）
 WHY_POOL = {
@@ -64,16 +67,23 @@ TERAZOU = load_terazou()
 
 
 def calm_band(prices):
+    """最安コマを必ず内側に含む“おだやかな連続帯” (start, end) を返す。
+
+    基準は min×1.3。最安コマを起点に左右へ「基準以下が続くあいだ」広げるので、
+    表示する時間帯と最安値（約X円）が食い違わない。
+    （以前は「最長の連続帯」を選んでいたため、最安コマが帯の外に出て
+      『9:00〜10:00ごろ（約6円）』なのに帯内は7円台…というズレが起きていた）
+    """
+    if not prices:
+        return (0, -1)
     ref = min(prices) * 1.3 + 0.01
-    best, s = (0, -1), None
-    for i, v in enumerate(prices + [10**9]):
-        if v <= ref and s is None:
-            s = i
-        elif v > ref and s is not None:
-            if i - 1 - s > best[1] - best[0]:
-                best = (s, i - 1)
-            s = None
-    return best
+    mi = prices.index(min(prices))
+    s = e = mi
+    while s - 1 >= 0 and prices[s - 1] <= ref:
+        s -= 1
+    while e + 1 < len(prices) and prices[e + 1] <= ref:
+        e += 1
+    return (s, e)
 
 
 def line_chart_svg(series, w=960, h=600):
@@ -100,23 +110,84 @@ def line_chart_svg(series, w=960, h=600):
         i = min(hh * 2, 47)
         p.append(f'<text x="{X(i):.0f}" y="{h-pad_b+40:.0f}" text-anchor="middle" font-size="25" fill="#b3a892">{hh}時</text>')
     p.append(f'<text x="{pad_l-60}" y="{pad_t+ph/2:.0f}" text-anchor="middle" font-size="23" fill="#b3a892" transform="rotate(-90 {pad_l-60} {pad_t+ph/2:.0f})">円/kWh</text>')
-    for idx, (area, arr) in enumerate(series.items()):
+
+    arrs = list(series.items())
+    # 各線に線種を割り当てる（実線→破線→点線）。値が完全一致して重なっても、
+    # 破線・点線なら下の線が透けて見え、3エリアを描いていることが伝わる。
+    # 描画は「実線→破線→点線」の順。後に描くほど前面なので、点線が必ず最前面に来る。
+    for idx, (area, arr) in enumerate(arrs):
         c = LINE_COLORS[idx % len(LINE_COLORS)]
+        dash = LINE_DASHES[idx % len(LINE_DASHES)]
+        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
         pts = " ".join(f"{X(i):.1f},{Y(v):.1f}" for i, v in enumerate(arr))
-        p.append(f'<polyline points="{pts}" fill="none" stroke="{c}" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>')
+        p.append(f'<polyline points="{pts}" fill="none" stroke="{c}" stroke-width="6" '
+                 f'stroke-linejoin="round" stroke-linecap="round"{dash_attr}/>')
+    # 最高値マーカーは線の上に（点線で隠れないよう最後にまとめて描画）
+    for idx, (area, arr) in enumerate(arrs):
+        c = LINE_COLORS[idx % len(LINE_COLORS)]
         mi = arr.index(max(arr))
         p.append(f'<circle cx="{X(mi):.1f}" cy="{Y(arr[mi]):.1f}" r="8" fill="{c}"/>')
+
+    # 完全一致して重なっている区間に「重なり」注記を出す（B+DのD）。
+    # 線種で見分けられても、完全一致区間はどうしても最前面の点線しか
+    # 見えないため、そこだけ「ここは同じ価格です」と言葉でも伝える。
+    if len(arrs) >= 2:
+        seg = _longest_overlap_segment([a for _, a in arrs])
+        if seg:
+            s, e = seg
+            xm = (X(s) + X(e)) / 2
+            ym = Y(arrs[0][1][s]) - 18  # 重なっている線のすぐ上
+            ym = max(ym, pad_t + 44)     # 「おだやか」ラベルや上端と被らせない
+            p.append(f'<text x="{xm:.0f}" y="{ym:.0f}" text-anchor="middle" font-size="22" '
+                     f'fill="#9b8e7c">3エリアほぼ同じ価格</text>')
+
     return f'<svg viewBox="0 0 {w} {h}" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">{"".join(p)}</svg>'
+
+
+def _longest_overlap_segment(arrays, tol=0.05):
+    """全系列の値がほぼ一致している最長の連続区間 (start, end) を返す。
+
+    tol は「同じ価格」とみなす許容差（円/kWh）。差がこの範囲なら重なりとみなす。
+    重なり区間が短すぎる（注記を置く意味がない）場合は None。
+    """
+    if len(arrays) < 2:
+        return None
+    n = len(arrays[0])
+    best = None
+    s = None
+    for i in range(n):
+        col = [a[i] for a in arrays]
+        same = (max(col) - min(col)) <= tol
+        if same and s is None:
+            s = i
+        elif not same and s is not None:
+            if best is None or (i - 1 - s) > (best[1] - best[0]):
+                best = (s, i - 1)
+            s = None
+    if s is not None:
+        if best is None or (n - 1 - s) > (best[1] - best[0]):
+            best = (s, n - 1)
+    # 3コマ（1.5時間）未満の重なりは注記しない（誤差レベルなので）
+    if best and (best[1] - best[0]) >= 3:
+        return best
+    return None
 
 
 def legend_html(series):
     out = []
     for idx, (area, arr) in enumerate(series.items()):
         c = LINE_COLORS[idx % len(LINE_COLORS)]
+        dash = LINE_DASHES[idx % len(LINE_DASHES)]
+        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
+        # 凡例も「色のドット」から「実際の線種サンプル」に変更。
+        # グラフと同じ実線/破線/点線を見せることで、どの線がどのエリアか対応づく。
+        sample = (f'<svg class="lsamp" width="46" height="14" viewBox="0 0 46 14">'
+                  f'<line x1="2" y1="7" x2="44" y2="7" stroke="{c}" stroke-width="5" '
+                  f'stroke-linecap="round"{dash_attr}/></svg>')
         hi = max(arr)
         lv, label, lvcolor = price_level(hi)
         tag = f'<span class="lvl" style="background:{lvcolor}">{label}</span>'
-        out.append(f'<span class="lg"><span class="dot" style="background:{c}"></span>{area}'
+        out.append(f'<span class="lg">{sample}{area}'
                    f'<span class="lgv">最高 {hi:.0f}円</span>{tag}</span>')
     return "".join(out)
 
@@ -126,7 +197,7 @@ def good_tip(jp, series):
     arr = series[lo_area]
     cs, ce = calm_band(arr)
     band = f"{slot_label(cs)}〜{slot_label(ce)}ごろ" if ce > cs else f"{slot_label(arr.index(min(arr)))}ごろ"
-    return (f"{jp}でいちばんおだやかなのは {lo_area}・{band}（約{min(arr):.0f}円）。"
+    return (f"{jp}でいちばんおだやかなのは {lo_area}・{band}（{yen_approx(min(arr))}）。"
             f"洗濯・食洗機・充電など“時間をずらせる電気”は、ここに寄せるとお得だゾウ。")
 
 
@@ -142,8 +213,9 @@ def national_summary(areas):
     cheapest = min(areas, key=lambda a: min(areas[a]))
     carr = areas[cheapest]
     lo_i = carr.index(min(carr))
-    # 段階4以上（＝20円以上「高め」）のエリアを注意対象として列挙
-    hot = [a for a in areas if max(areas[a]) >= 17]
+    # 「高め（レベル4）」以上のエリアを注意対象として列挙。
+    # しきい値は alert_config.HIGH_FLOOR（PRICE_LEVELSから自動導出）に一本化。
+    hot = [a for a in areas if max(areas[a]) >= HIGH_FLOOR]
     if not hot:
         if lv <= 2:
             hot_line = '<span class="ok">&#9728; 高すぎる時間は無さそう。安心して使えるゾウ</span>'
@@ -155,7 +227,7 @@ def national_summary(areas):
         hot_line = f'<span class="warn">&#9650; 高めの時間に注意</span>　{"・".join(hot)}'
     return {
         "pre": "あしたは、", "mood": mood, "color": color,
-        "cheap_area": cheapest, "cheap_time": slot_label(lo_i), "cheap_val": f"{min(carr):.0f}",
+        "cheap_area": cheapest, "cheap_time": slot_label(lo_i), "cheap_val": yen_approx(min(carr)),
         "hot_line": hot_line,
     }
 
@@ -254,6 +326,7 @@ PAGE = '''<!DOCTYPE html>
   .legend{{display:flex;gap:30px;flex-wrap:wrap;margin-top:18px;justify-content:center;}}
   .lg{{display:flex;align-items:center;gap:11px;font-size:32px;font-weight:500;color:#573C2C;}}
   .lg .dot{{width:24px;height:24px;border-radius:50%;}}
+  .lg .lsamp{{flex:0 0 auto;}}
   .lg .lgv{{font-size:26px;color:#9b8e7c;margin-left:4px;font-weight:400;}}
   .lg .lvl{{font-size:24px;color:#fff;padding:4px 16px;border-radius:16px;margin-left:7px;font-weight:700;}}
   .tip{{border-radius:26px;padding:26px 32px;margin-top:24px;}}
@@ -285,7 +358,7 @@ PAGE = '''<!DOCTYPE html>
       <div>
         <div class="mood"><div class="big" style="color:{mood_color}">{mood}</div></div>
         <div class="summary">
-          <div class="srow"><span class="lo">&#9660; いちばんおだやか</span>　{cheap_area}・{cheap_time}ごろ（約{cheap_val}円）</div>
+          <div class="srow"><span class="lo">&#9660; いちばんおだやか</span>　{cheap_area}・{cheap_time}ごろ（{cheap_val}）</div>
           <div class="srow">{hot_line}</div>
         </div>
       </div>

@@ -4,7 +4,7 @@
 JEPXのスポット約定結果CSV（spot_summary_<年度>.csv）を取得し、
 data/spot_summary.csv として保存する。
 
-- 電力年度（4月始まり）を自動判定して現年度のCSVを取得する。
+- 配信対象である「あした（JST）」の日付から電力年度（4月始まり）を自動判定して取得する。
 - 毎朝の自動実行（JEPX公表 10:30 の後）で使う想定。
 - JEPX窓口に自動取得の可否は確認済み。
 
@@ -17,21 +17,34 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import date
+from datetime import datetime, timedelta, timezone
 
 OUT = os.path.join("data", "spot_summary.csv")
 DOWNLOAD_URL = "https://www.jepx.jp/_download.php"
 REFERER = "https://www.jepx.jp/electricpower/market-data/spot/"
 
+# GitHub Actions のランナーは UTC なので、日付の基準は必ず JST を明示する
+JST = timezone(timedelta(hours=9), "JST")
 
-def fiscal_year(today=None):
+
+def fiscal_year(d):
     """電力年度（4月始まり）。1〜3月は前年を返す。"""
-    today = today or date.today()
-    return today.year if today.month >= 4 else today.year - 1
+    return d.year if d.month >= 4 else d.year - 1
+
+
+def target_fiscal_year():
+    """配信対象（＝あした・JST）の日付が属する年度を返す。
+
+    でんき予報が扱うのは「あした」のスポット価格なので、年度判定も
+    あしたの日付で行う。これをしないと 3/31 だけ、あした（4/1）の
+    データが翌年度ファイルにあるのに当年度ファイルを取りに行ってしまう。
+    """
+    tomorrow = datetime.now(JST).date() + timedelta(days=1)
+    return fiscal_year(tomorrow)
 
 
 def fetch(fy=None):
-    fy = fy or fiscal_year()
+    fy = fy or target_fiscal_year()
     fname = f"spot_summary_{fy}.csv"
     ts = int(time.time() * 1000)
     url = f"{DOWNLOAD_URL}?timestamp={ts}"

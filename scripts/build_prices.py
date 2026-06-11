@@ -17,10 +17,13 @@ import csv
 import json
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 DEFAULT_CSV = os.path.join("data", "spot_summary.csv")
 OUTPUT_JSON = "prices.json"
+
+# GitHub Actions のランナーは UTC なので、日付の基準は必ず JST を明示する
+JST = timezone(timedelta(hours=9), "JST")
 
 COL_DATE = 0
 COL_SLOT = 1
@@ -34,7 +37,9 @@ def load_rows(csv_path):
             f"CSVが見つかりません: {csv_path}\n"
             f"  → JEPXのCSVを {DEFAULT_CSV} に置いてから実行してください。"
         )
-    with open(csv_path, encoding="shift_jis", newline="") as f:
+    # JEPXのCSVはWindows由来。cp932（shift_jisの上位互換）で読むと
+    # 「①」やローマ数字などの機種依存文字でも文字化け・例外を起こしにくい。
+    with open(csv_path, encoding="cp932", newline="") as f:
         rows = list(csv.reader(f))
     if len(rows) < 2:
         raise SystemExit(f"CSVにデータ行がありません: {csv_path}")
@@ -45,7 +50,12 @@ def pick_target_date(rows, target=None):
     dates = [r[COL_DATE] for r in rows if r and r[COL_DATE]]
     if target:
         if target not in dates:
-            raise SystemExit(f"指定日 {target} がCSVに見つかりません。CSVの範囲を確認してください。")
+            raise SystemExit(
+                f"指定日 {target} がCSVに見つかりません（CSVの最新日: {max(dates)}）。\n"
+                "  → JEPXの公表前・公表遅延の可能性があります。\n"
+                "  → 自動実行（--require-tomorrow）では古いデータを配信せずここで中断し、"
+                "後続のリトライ実行に任せます。"
+            )
         return target
     return max(dates)
 
@@ -75,7 +85,7 @@ def build(csv_path, target=None):
         "date_raw": target_date,
         "date_label": format_jp_date(target_date),
         "unit": "円/kWh",
-        "slots": 48,
+        "slots": len(day_rows),
         "areas": area_prices,
     }
 
@@ -84,11 +94,22 @@ def main():
     args = list(sys.argv[1:])
     csv_path = DEFAULT_CSV
     target = None
+    require_tomorrow = False
     for a in args:
-        if a.endswith(".csv"):
+        if a == "--require-tomorrow":
+            require_tomorrow = True
+        elif a.endswith(".csv"):
             csv_path = a
         else:
             target = a
+
+    # 自動実行用の鮮度チェック：配信対象は必ず「あした（JST）」。
+    # CSVの最新日を黙って使うと、JEPXの公表遅延時に昨日のデータを
+    # 「あした」として再配信してしまうため、日付をピン留めする。
+    if require_tomorrow and target is None:
+        tomorrow = datetime.now(JST).date() + timedelta(days=1)
+        target = f"{tomorrow.year}/{tomorrow.month:02d}/{tomorrow.day:02d}"
+        print(f"鮮度チェック: あした（{target}）のデータを要求します。")
 
     out = build(csv_path, target)
 

@@ -43,19 +43,34 @@ def price_level(peak):
     return len(PRICE_LEVELS), last[1], last[2]
 
 
+def _high_floor():
+    """「高め」帯（レベル4）に入る下限値（円/kWh）を PRICE_LEVELS から導出する。
+    = ひとつ下の帯「ふつう」の上限。これにより「高めのエリア」の判定を
+    PRICE_LEVELS と一致させ、しきい値を変えるときは PRICE_LEVELS だけ直せばよい。
+    （以前は build_stories.py / notify_slack.py に 17 がベタ書きで二重管理だった）"""
+    for i, (_upper, label, _color) in enumerate(PRICE_LEVELS):
+        if label == "高め" and i > 0:
+            return PRICE_LEVELS[i - 1][0]
+    # フォールバック：上から2番目の境界
+    return PRICE_LEVELS[-2][0] if len(PRICE_LEVELS) >= 2 else 0
+
+
+# 日内最高値がこの値以上なら「高め（以上）」とみなす下限（円/kWh）。
+HIGH_FLOOR = _high_floor()
+
+
+def yen_approx(v, unit="円"):
+    """概算の円表示（「約X円」）。表記を一箇所に集約しておく窓口。
+    0.01円のような最安値も「約0円」と出すのは、四捨五入として誤りではなく、
+    かつ『ほぼタダの時間帯がある』という安さのインパクトが伝わりやすいため。
+    （※実際の電気料金は託送料金・手数料が加わる旨はストーリーズ脚注で明記）"""
+    return f"約{v:.0f}{unit}"
+
+
 # 毎日便りメールを「希望する」お客様の購読エリア（CIS連携前の暫定。
 # 実運用では購読者管理から動的に取得する）。空なら全エリアぶんを生成。
 DAILY_SUBSCRIBE_AREAS = []  # 例: ["関西", "東京"]
 
-# Instagramカルーセルで重ねて見せる代表エリア（入口用）
-FEATURE_AREAS = ["東京", "関西", "九州"]
-FEATURE_COLORS = {"東京": "#E1AF00", "関西": "#6496C8", "九州": "#C77B4B"}
-
-# カルーセルの地域ブロック（1枚に3エリア重ね）。ローマ字は英語ラベル用。
-REGION_BLOCKS = [
-    ("北日本エリア", ["北海道", "東北", "東京"], ["HOKKAIDO", "TOHOKU", "TOKYO"]),
-    ("中日本エリア", ["中部", "北陸", "関西"], ["CHUBU", "HOKURIKU", "KANSAI"]),
-    ("西日本エリア", ["中国", "四国", "九州"], ["CHUGOKU", "SHIKOKU", "KYUSHU"]),
-]
-# ブロック内3本の線の色（位置で割当）：アンバー / ブルー / テラコッタ
-BLOCK_COLORS = ["#E1AF00", "#6496C8", "#C77B4B"]
+# （旧）Instagramカルーセル用の FEATURE_AREAS / REGION_BLOCKS などは、
+# 現行 build_stories.py が GROUPS / LINE_COLORS を自前で持つようになり
+# 未使用（デッド設定）になったため削除した。必要になれば build_stories.py 側で定義する。
