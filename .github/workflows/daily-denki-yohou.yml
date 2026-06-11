@@ -2,6 +2,8 @@ name: でんき予報 デイリー生成（自動）
 # 起動タイミング：
 #  - 毎朝 10:40 / 11:10 / 11:40 JST の3回（GitHubの遅延対策で複数仕掛ける）。
 #    当日まだ配信していなければ最初の1回だけ実処理し、残りはスキップ（重複防止）。
+#    ※配信済みマーカー(docs/.last_run)は「Instagram投稿が成功した後」に書く。
+#      → 途中でこけた日は判子を押さないので、予備cronがちゃんと再実行できる。
 #  - data/spot_summary.csv を更新push したとき（手動差し替え時のフォールバック）
 #  - 手動実行（Run workflow）は常に実行（ガード無視）
 #  ※ 実運用の定時起動は cron-job.org からの workflow_dispatch を主役にしている。
@@ -63,8 +65,6 @@ jobs:
           mkdir -p docs/stories
           cp stories_*.png docs/stories/
           cp prices.json   docs/prices.json
-      - name: 当日の配信日を記録（重複防止マーカー）
-        run: TZ=Asia/Tokyo date +%Y-%m-%d > docs/.last_run
       - name: ⑤ コミット＆プッシュ（GitHub Pages 公開）
         run: |
           git config user.name  "tera-denki-bot"
@@ -74,14 +74,36 @@ jobs:
           git push
       - name: Pages 反映待ち
         run: sleep 45
-      - name: ⑥ Slack へ通知
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL }}
-        run: python scripts/notify_slack.py
-      - name: ⑦ Instagram Stories へ投稿
+      # ── 本命：先に投稿を済ませる ──────────────────────────────
+      - name: ⑥ Instagram Stories へ投稿
         env:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL }}
         run: python scripts/post_instagram_stories.py
+      # ── 投稿が成功してから「配信済み」の判子を押す ────────────
+      - name: ⑦ 当日の配信日を記録（重複防止マーカー：投稿成功後）
+        run: |
+          TZ=Asia/Tokyo date +%Y-%m-%d > docs/.last_run
+          git config user.name  "tera-denki-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/.last_run
+          git commit -m "mark delivered $(TZ=Asia/Tokyo date +%Y-%m-%d)" || echo "変更なし（スキップ）"
+          git push
+      # ── オマケの通知：失敗してもジョブは止めない ──────────────
+      - name: ⑧ Slack へ通知（完了報告・非必須）
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PAGES_BASE_URL: ${{ vars.PAGES_BASE_URL }}
+        run: python scripts/notify_slack.py
+      # ── どこかでこけたら必ずSlackに通報（沈黙させない） ────────
+      - name: ❌ 失敗時はSlackに通報
+        if: failure()
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -s --max-time 10 -X POST -H 'Content-Type: application/json' \
+            --data '{"text":":x: でんき予報の自動投稿がコケました。Actionのログと Instagram を確認してください。"}' \
+            "$SLACK_WEBHOOK_URL" || echo "Slack通報も失敗（ネットワーク不通の可能性）"
