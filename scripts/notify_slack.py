@@ -73,7 +73,7 @@ def main():
     payload = json.dumps({"blocks": blocks}).encode("utf-8")
     req = urllib.request.Request(webhook, data=payload,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req) as res:
+    with urllib.request.urlopen(req, timeout=10) as res:
         print("Slack通知 送信:", res.status)
 
 
