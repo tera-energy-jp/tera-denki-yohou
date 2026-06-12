@@ -1,12 +1,19 @@
 name: でんき予報 デイリー生成（自動）
 # 起動タイミング：
-#  - 毎朝 10:40 / 11:10 / 11:40 JST の3回（GitHubの遅延対策で複数仕掛ける）。
-#    当日まだ「配信完了」していなければ実処理し、完了済みならスキップ。
-#    ※ 配信済みマーカー（docs/.last_run）は Instagram 投稿の成功後にのみ書く。
-#      → 途中で失敗した回があっても、後続の cron が自動でリトライしてくれる。
+#  - cron-job.org からの workflow_dispatch（実運用の主役）
+#  - 毎朝 10:40 / 11:10 / 11:40 JST のネイティブ cron（GitHub遅延対策の予備）
+#    → どちらの自動起動でも「当日まだ未配信なら実処理／配信済みならスキップ」。
+#      配信済みマーカー（docs/.last_run）は Instagram 投稿の成功後にのみ書く。
 #  - data/spot_summary.csv を更新push したとき（手動差し替え時のフォールバック）
-#  - 手動実行（Run workflow）は常に実行（ガード無視）
-#  ※ 実運用の定時起動は cron-job.org からの workflow_dispatch を主役にしている。
+#  - 手動で再配信したいときだけ Run workflow → force=true でガードを無視
+#
+#  ★今回の修正点（3連投の再発防止）
+#   (1) workflow_dispatch も原則ガードを尊重する。
+#       以前は workflow_dispatch を無条件で素通ししていたため、
+#       cron-job.org の複数dispatchが全部投稿してしまっていた。
+#       手動の強制再配信は inputs.force=true のときだけ許可する。
+#   (2) concurrency で同時並走を禁止（同時刻トリガの重複投稿を防ぐ最後の砦）。
+#   (3) マーカー記録ステップ⑨を、変更が無くても落ちない／push競合に強い形へ。
 on:
   schedule:
     - cron: '40 1 * * *'   # 10:40 JST
@@ -16,10 +23,23 @@ on:
     paths:
       - 'data/spot_summary.csv'
   workflow_dispatch:
+    inputs:
+      force:
+        description: '配信済みでも強制的に再配信する（手動で出し直したいときだけ true）'
+        type: boolean
+        default: false
+
 permissions:
   contents: write   # 生成したPNG/JSONを docs/ にコミットするため
+
+# 同じ日に複数トリガが重なっても、絶対に同時並走させない（重複投稿の最後の砦）。
+# 走っている分が終わってから次が動き、そのとき改めてガード判定し直す。
+concurrency:
+  group: denki-yohou-daily
+  cancel-in-progress: false
+
 jobs:
-  # 当日すでに配信済みかを判定（複数cronの重複実行を防ぐ）
+  # 当日すでに配信済みかを判定（複数トリガの重複実行を防ぐ）
   guard:
     runs-on: ubuntu-latest
     outputs:
@@ -36,12 +56,16 @@ jobs:
             echo "本日（$TODAY）は未配信。実行します。"
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           fi
+
   build-and-notify:
     needs: guard
-    # 自動実行（cron）は「当日未配信」のときだけ。
-    # 手動実行（workflow_dispatch）と CSV手動差し替え（push）は常に実行
-    # （push はフォールバック用なので、配信済みガードに阻まれないようにする）。
-    if: needs.guard.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    # 自動起動（cron / cron-job.org の workflow_dispatch）は「当日未配信」のときだけ。
+    # 手動で再配信したいときは Run workflow → force=true でガード無視。
+    # CSV手動差し替え（push）はフォールバックなので常に実行。
+    if: >-
+      needs.guard.outputs.should_run == 'true'
+      || (github.event_name == 'workflow_dispatch' && github.event.inputs.force == 'true')
+      || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: チェックアウト
@@ -59,7 +83,7 @@ jobs:
       - name: ① prices.json を生成（鮮度チェック付き）
         # --require-tomorrow：CSVの最新日ではなく「あした（JST）」を明示要求。
         # あしたのデータがまだ無ければここで失敗し、古いデータの再配信を防ぐ。
-        # マーカー未記録のまま終わるので、後続の cron が自動でリトライする。
+        # マーカー未記録のまま終わるので、後続の起動が自動でリトライする。
         run: python scripts/build_prices.py --require-tomorrow
       - name: ② stories.html を生成
         run: python scripts/build_stories.py
@@ -74,9 +98,12 @@ jobs:
         run: |
           git config user.name  "tera-denki-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add docs/
-          git commit -m "でんき予報 $(TZ=Asia/Tokyo date +%Y-%m-%d)" || echo "変更なし（スキップ）"
-          git push
+          # 取得した元データ(csv)も一緒にコミットして作業ツリーを汚さない
+          git add docs/ data/spot_summary.csv
+          git diff --cached --quiet && echo "変更なし（スキップ）" \
+            || git commit -m "でんき予報 $(TZ=Asia/Tokyo date +%Y-%m-%d)"
+          git push origin HEAD:main \
+            || (git pull --rebase --autostash origin main && git push origin HEAD:main)
       - name: ⑥ Pages 反映待ち（prices.json の日付で実確認）
         # 固定 sleep だとデプロイ遅延時に旧画像をIG側が掴むため、
         # 公開URLの prices.json が今回の日付になるまでポーリングする（最大5分）。
@@ -112,14 +139,17 @@ jobs:
         run: python scripts/post_instagram_stories.py
       - name: ⑨ 配信済みマーカーを記録（IG投稿の成功後のみ）
         # ここまで到達＝Instagram投稿まで成功。マーカーを書いて当日分を完了扱いに。
-        # 途中で失敗した場合はマーカーが書かれず、後続 cron がリトライする。
+        # 既に今日の日付なら commit をスキップ（旧版は exit 1 で赤くなっていた）。
+        # push が競合した場合は rebase してから再push（同時起動への保険）。
         run: |
           TZ=Asia/Tokyo date +%Y-%m-%d > docs/.last_run
           git config user.name  "tera-denki-bot"
           git config user.email "bot@users.noreply.github.com"
           git add docs/.last_run
-          git commit -m "配信済みマーカー $(TZ=Asia/Tokyo date +%Y-%m-%d)"
-          git push
+          git diff --cached --quiet && echo "マーカー変更なし（既に記録済み）" \
+            || git commit -m "配信済みマーカー $(TZ=Asia/Tokyo date +%Y-%m-%d)"
+          git push origin HEAD:main \
+            || (git pull --rebase --autostash origin main && git push origin HEAD:main)
       - name: ⑩ Slack へ通知（安否確認・失敗しても本体に影響させない）
         if: always()              # 途中のステップが失敗した日こそ必ず通知する
         continue-on-error: true   # Slack自体の失敗でジョブを赤にしない
