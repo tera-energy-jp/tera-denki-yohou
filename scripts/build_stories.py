@@ -26,7 +26,8 @@ LINE_COLORS = ["#6496C8", "#E1AF00", "#7A9A5A"]
 # 値が完全一致して重なっても線種で見分けられるようにするため。
 LINE_DASHES = ["", "16 10", "3 9"]
 
-# 「なんで時間で変わるの？」地域別の豆知識プール（日替わりでランダム表示）
+# 「なんで時間で変わるの？」地域別の豆知識プール
+# ※2026-06 改定でパネル自体を全スライドから非表示に。データは将来復活用に保持。
 WHY_POOL = {
     "東日本": [
         "日中は冷暖房などで電気を使う人が増えて価格が上がるゾウ。早朝や深夜はみんな休んでいて需要が落ち着くから狙い目だゾウ。",
@@ -238,10 +239,10 @@ def header(date_label):
             f'<div class="st2">{date_label}</div></div></div>')
 
 
-def chart_story(en, jp, series, date_label, why, pageno):
+def chart_story(en, jp, series, date_label, pageno):
     return STORY_CHART.format(
         header=header(date_label), en=en, jp=jp, chart=line_chart_svg(series),
-        legend=legend_html(series), good=good_tip(jp, series), why=why, pageno=pageno)
+        legend=legend_html(series), good=good_tip(jp, series), pageno=pageno)
 
 
 def build(prices_path):
@@ -255,8 +256,7 @@ def build(prices_path):
     page = 2
     for en, jp, names in GROUPS:
         series = {n: areas[n] for n in names if n in areas}
-        why = random.choice(WHY_POOL[jp])
-        stories += chart_story(en, jp, series, date_label, why, f"{page} / 5")
+        stories += chart_story(en, jp, series, date_label, f"{page} / 5")
         page += 1
 
     cover_cloud = CLOUD.replace('class="cloud"', 'class="cloud" style="top:-60px;right:-80px;"')
@@ -274,10 +274,9 @@ STORY_CHART = '''
       {header}
       <div class="eyebrow">{en}</div>
       <h2>{jp}<span class="hen">編</span></h2>
-      <div class="chartbox"><div style="height:600px;">{chart}</div>
+      <div class="chartbox"><div style="height:680px;">{chart}</div>
         <div class="legend">{legend}</div></div>
       <div class="tip tip-good"><span class="tt">&#9786; お得な狙い目</span><span class="tb">{good}</span></div>
-      <div class="tip tip-why"><span class="tt">&#128161; なんで時間で変わるの？</span><span class="tb">{why}</span></div>
       <div class="foot">&#8596; ほかのエリアの編も スワイプでチェックゾウ</div>
     </div>
     <div class="pageno">{pageno}</div>
@@ -329,18 +328,21 @@ PAGE = '''<!DOCTYPE html>
   .lg .lsamp{{flex:0 0 auto;}}
   .lg .lgv{{font-size:26px;color:#9b8e7c;margin-left:4px;font-weight:400;}}
   .lg .lvl{{font-size:24px;color:#fff;padding:4px 16px;border-radius:16px;margin-left:7px;font-weight:700;}}
-  .tip{{border-radius:26px;padding:26px 32px;margin-top:24px;}}
-  .tip .tt{{display:block;font-size:31px;font-weight:700;margin-bottom:9px;}}
-  .tip .tb{{display:block;font-size:30px;line-height:1.62;color:#5c5346;font-weight:400;}}
-  .tip-good{{background:#FFF3DE;}} .tip-good .tt{{color:#E8800E;}}
-  .tip-why{{background:#fff;border:2px solid #FBE6C8;}} .tip-why .tt{{color:#F2A03D;font-size:29px;}}
+  .tip{{border-radius:34px;padding:48px 52px;margin-top:46px;}}
+  .tip .tt{{display:block;font-weight:700;margin-bottom:18px;}}
+  .tip .tb{{display:block;color:#5c5346;font-weight:400;}}
+  .tip-good{{background:#FFF3DE;}}
+  .tip-good .tt{{color:#E8800E;font-size:45px;}}
+  .tip-good .tb{{font-size:42px;line-height:1.72;}}
   .foot{{text-align:center;font-size:28px;color:#C99A2E;font-weight:700;margin-top:auto;padding-top:24px;}}
 
   .closing .pad{{justify-content:space-between;}}
   .closing .msg{{font-size:74px;font-weight:900;color:#573C2C;line-height:1.5;}}
   .closing .msg em{{color:#F39A2B;font-style:normal;}}
   .closing .lead{{font-size:34px;color:#7a6f5f;line-height:1.9;margin-top:34px;font-weight:300;}}
-  .linkcue{{display:inline-flex;align-items:center;gap:16px;background:#F39A2B;color:#fff;font-size:31px;font-weight:700;padding:28px 42px;border-radius:54px;}}
+  .linkcue{{display:inline-flex;align-items:center;gap:22px;background:#F39A2B;color:#fff;font-size:31px;font-weight:700;padding:32px 48px;border-radius:44px;line-height:1.5;}}
+  .linkcue .lc-ico{{flex:0 0 auto;}}
+  .linkcue .lc-txt{{text-align:left;}}
   .footnote{{font-size:23px;color:#b3a892;line-height:1.7;font-weight:300;margin-top:30px;}}
 </style></head>
 <body>
@@ -377,7 +379,7 @@ PAGE = '''<!DOCTYPE html>
         <div class="lead">電気は、ただのエネルギーじゃない。<br>いつ使うかを自分で選べることが、<br>おだやかな安心につながりますように。</div>
       </div>
       <div>
-        <span class="linkcue"><span>&#128279;</span>各エリアの予報は プロフィールのリンクから確認できるゾウ</span>
+        <span class="linkcue"><span class="lc-ico">&#128279;</span><span class="lc-txt">各エリアの予報は<br>プロフィールのリンクから確認できるゾウ</span></span>
         <div class="footnote">※市場価格（JEPXエリアプライス）のめやすです。実際の電気料金には託送料金やTERAの手数料などが加わります。</div>
       </div>
     </div>
