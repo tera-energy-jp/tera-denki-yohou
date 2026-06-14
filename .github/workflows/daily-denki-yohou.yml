@@ -85,6 +85,16 @@ jobs:
         # あしたのデータがまだ無ければここで失敗し、古いデータの再配信を防ぐ。
         # マーカー未記録のまま終わるので、後続の起動が自動でリトライする。
         run: python scripts/build_prices.py --require-tomorrow
+      - name: ①' history.json を生成（過去データ、Web表示用）
+        # prices.json と異なり失敗してもフローを止めない（追加機能のため）
+        continue-on-error: true
+        run: python scripts/build_history.py
+      - name: ①'' monthly.json を更新（月平均くらべ、Web表示用）
+        # マージモード：既存 docs/monthly.json に当年度ぶんだけ反映する。
+        # 過去年度CSVはリポジトリに持たない方針（正本はJEPX）。過去の月は保持される。
+        # 失敗してもフローは止めない。
+        continue-on-error: true
+        run: python scripts/build_monthly.py
       - name: ② stories.html を生成
         run: python scripts/build_stories.py
       - name: ③ PNG（5枚）を書き出し
@@ -94,11 +104,12 @@ jobs:
           mkdir -p docs/stories
           cp stories_*.png docs/stories/
           cp prices.json   docs/prices.json
+          [ -f history.json ] && cp history.json docs/history.json || true
+          [ -f monthly.json ] && cp monthly.json docs/monthly.json || true
       - name: ⑤ コミット＆プッシュ（GitHub Pages 公開）
         run: |
           git config user.name  "tera-denki-bot"
           git config user.email "bot@users.noreply.github.com"
-          # 取得した元データ(csv)も一緒にコミットして作業ツリーを汚さない
           git add docs/ data/spot_summary.csv
           git diff --cached --quiet && echo "変更なし（スキップ）" \
             || git commit -m "でんき予報 $(TZ=Asia/Tokyo date +%Y-%m-%d)"
