@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+/stories.html
+/stories_*.png
+/prices.json
+/history.json
+/monthly.json
