@@ -76,6 +76,22 @@
   .tip-why .tt{font-size:11px;font-weight:600;color:var(--amber);margin-bottom:3px;}
   .tip-why .tb{font-size:12.5px;line-height:1.65;color:var(--ink);}
 
+
+  /* チャートラップ（ツールチップ用） */
+  .chart-wrap{position:relative;}
+  .chart-tooltip{
+    position:absolute; pointer-events:none; display:none;
+    background:rgba(74,68,64,0.92); color:#fff;
+    font-size:12px; font-weight:600; padding:5px 10px;
+    border-radius:8px; white-space:nowrap; z-index:10;
+    box-shadow:0 2px 8px rgba(0,0,0,0.18);
+  }
+  /* ① 同一エリアノート */
+  .same-note{
+    font-size:11.5px; color:#5E83A0; background:#EAF2F9;
+    border-radius:10px; padding:7px 12px; margin-top:6px;
+    text-align:left; display:none; line-height:1.5;
+  }
   .note{font-size:11px; color:var(--muted); line-height:1.6; text-align:center; margin-top:14px;}
 
   /* ビュー切替タブ */
@@ -159,7 +175,8 @@
         <span class="panel-area" id="p-area"></span>
         <span class="panel-level" id="p-level"></span>
       </div>
-      <div id="p-chart"></div>
+      <div id="p-chart" class="chart-wrap"></div>
+      <div id="p-same-note" class="same-note"></div>
       <div class="stats">
         <div class="stat lo"><div class="t">&#9660; いちばん安い</div><div class="v" id="p-lo"></div></div>
         <div class="stat hi"><div class="t">&#9650; いちばん高い</div><div class="v" id="p-hi"></div></div>
@@ -215,11 +232,11 @@
 
 <script>
 const AREA_COPY = {
-  east:{ action:"早朝と深夜が安めの日が多めです。洗濯・食洗機・炊飯予約・EV充電をこの時間に寄せると◎ゾウ",
-         why:"日中は冷暖房などで電気を使う人が増えて価格が上がるゾウ。早朝や深夜はみんなが休んでいて需要が落ち着くから狙い目ゾウ！" },
-  solar:{ action:"晴れた日のお昼が大チャンス。洗濯・食洗機・お湯わかし・EV充電をお昼に寄せると◎ゾウ",
+  east:{ action:"早朝と深夜が安めの日が多めです。洗濯・食洗機・炊飯予約・EV充電をこの時間に寄せると◎",
+         why:"日中は冷暖房などで電気を使う人が増えて価格が上がるゾウ。早朝や深夜はみんなが休んでいて需要が落ち着くから狙い目だゾウ！" },
+  solar:{ action:"晴れた日のお昼が大チャンス。洗濯・食洗機・お湯わかし・EV充電をお昼に寄せると◎",
           why:"太陽光発電が多い地域は、晴れたお昼に電気があり余って価格がぐっと下がるゾウ。夕方は太陽が沈んで需要も残るから高くなりやすいゾウ！" },
-  mid:{ action:"朝〜午前と深夜が狙い目。洗濯・食洗機・炊飯予約・EV充電をこの時間に寄せると◎ゾウ",
+  mid:{ action:"朝〜午前と深夜が狙い目。洗濯・食洗機・炊飯予約・EV充電をこの時間に寄せると◎",
         why:"晴れたお昼は太陽光で価格が下がることがあるゾウ。逆に夕方は仕事や家事が重なって需要が集まり、高くなりやすいゾウ！" },
 };
 const COPY_MAP = {
@@ -274,7 +291,17 @@ function chart(prices){
   const linePts=prices.map((p,i)=>x(i).toFixed(1)+","+y(p).toFixed(1)).join(" ");
   const areaPts=`${L},${T+plotH} `+linePts+` ${W-R},${T+plotH}`;
 
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}">
+  // ③ ツールチップ用：クロスヘア線・ドット・透明オーバーレイ
+  const cross=`<line id="c-cross" x1="-999" y1="${T}" x2="-999" y2="${T+plotH}" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="3 3" opacity="0" pointer-events="none"/>`;
+  const dot=`<circle id="c-dot" cx="-999" cy="-999" r="4.5" fill="var(--amber)" stroke="#fff" stroke-width="1.5" opacity="0" pointer-events="none"/>`;
+  // prices を data 属性に埋め込む（JSON.stringify でエスケープ）
+  const pdata=prices.map(v=>v.toFixed(2)).join(',');
+  const overlay=`<rect x="${L}" y="${T}" width="${plotW}" height="${plotH}" fill="transparent" style="cursor:crosshair"
+    data-prices="${pdata}" data-l="${L}" data-plotw="${plotW}" data-t="${T}" data-ploth="${plotH}" data-ymax="${yMax}"
+    onmousemove="chartMove(event,this)" onmouseleave="chartLeave()"
+    ontouchmove="chartTouch(event,this)" ontouchend="chartLeave()"/>`;
+
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" style="overflow:visible">
     ${bandLo}${bandHi}${grid}${xlab}
     <polygon points="${areaPts}" fill="var(--line)" opacity="0.07"/>
     <polyline points="${linePts}" fill="none" stroke="var(--line)" stroke-width="2.4" stroke-linejoin="round"/>
@@ -282,7 +309,61 @@ function chart(prices){
     <circle cx="${x(maxI)}" cy="${y(prices[maxI])}" r="4.5" fill="var(--hi)"/>
     <text x="${x(minI)}" y="${y(prices[minI])+16}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--lo)">最安</text>
     <text x="${x(maxI)}" y="${y(prices[maxI])-9}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--hi)">最高</text>
-  </svg>`;
+    ${cross}${dot}${overlay}
+  </svg>
+  <div id="chart-tip" class="chart-tooltip"></div>`;
+}
+
+// ③ ツールチップ: マウス移動
+function chartMove(e, el){
+  const svg=el.closest('svg');
+  const rect=svg.getBoundingClientRect();
+  const scale=440/rect.width;
+  const svgX=(e.clientX-rect.left)*scale;
+  const L=+el.dataset.l, plotW=+el.dataset.plotw;
+  const T=+el.dataset.t, plotH=+el.dataset.ploth, yMax=+el.dataset.ymax;
+  const prices=el.dataset.prices.split(',').map(Number);
+  const slot=Math.max(0,Math.min(47,Math.round((svgX-L)/plotW*47)));
+  const price=prices[slot];
+  const cx=(L+slot/47*plotW).toFixed(1);
+  const cy=(T+(1-price/yMax)*plotH).toFixed(1);
+  // クロスヘア更新
+  const cr=svg.querySelector('#c-cross'), dt=svg.querySelector('#c-dot');
+  if(cr){cr.setAttribute('x1',cx);cr.setAttribute('x2',cx);cr.setAttribute('opacity','0.7');}
+  if(dt){dt.setAttribute('cx',cx);dt.setAttribute('cy',cy);dt.setAttribute('opacity','1');}
+  // ツールチップ更新
+  const h=Math.floor(slot/2), m=slot%2?'30':'00';
+  const tip=document.getElementById('chart-tip');
+  if(tip){
+    tip.textContent=(h+':'+m.padStart(2,'0'))+' ／ '+price.toFixed(1)+' 円/kWh';
+    tip.style.display='block';
+    // 位置: SVG内クロスヘアをpx換算してラップ内に配置
+    const wrap=svg.closest('.chart-wrap')||svg.parentElement;
+    const wr=wrap.getBoundingClientRect();
+    let lx=e.clientX-wr.left+12, ty=e.clientY-wr.top-32;
+    // 右端はみ出し防止
+    if(lx+120>wr.width) lx=e.clientX-wr.left-120;
+    // 上端はみ出し防止（グラフ上部でラベルが見切れないように）
+    if(ty<0) ty=e.clientY-wr.top+16;
+    tip.style.left=lx+'px'; tip.style.top=ty+'px';
+  }
+}
+// ③ ツールチップ: タッチ
+function chartTouch(e, el){
+  if(e.touches.length===0) return;
+  e.preventDefault();
+  chartMove({clientX:e.touches[0].clientX,clientY:e.touches[0].clientY},el);
+}
+// ③ ツールチップ: 非表示
+function chartLeave(){
+  const svg=document.querySelector('#p-chart svg');
+  if(svg){
+    const cr=svg.querySelector('#c-cross'),dt=svg.querySelector('#c-dot');
+    if(cr) cr.setAttribute('opacity','0');
+    if(dt) dt.setAttribute('opacity','0');
+  }
+  const tip=document.getElementById('chart-tip');
+  if(tip) tip.style.display='none';
 }
 
 function updateDateNav(){
@@ -322,6 +403,21 @@ function render(){
   document.getElementById("p-why").textContent = copy.why;
   document.querySelectorAll(".pill").forEach(b=>b.classList.toggle("active", b.dataset.area===current));
   updateDateNav();
+
+  // ① 同一エリアプライス検知（北陸・関西など混雑なし日に同値になるケース）
+  const sameNote = document.getElementById("p-same-note");
+  if(sameNote && DATA){
+    const prStr = pr.join(",");
+    const sameAreas = Object.keys(DATA.areas).filter(a =>
+      a !== current && DATA.areas[a].join(",") === prStr
+    );
+    if(sameAreas.length > 0){
+      sameNote.textContent = "📌 本日は " + sameAreas.join("・") + " エリアと同一エリアプライスです（系統混雑なし）";
+      sameNote.style.display = "block";
+    } else {
+      sameNote.style.display = "none";
+    }
+  }
 }
 
 function navigateTo(idx){
@@ -429,7 +525,7 @@ function renderSeason(areaData){
 
   document.getElementById("m-explain-tt").textContent = "この見方のポイント";
   document.getElementById("m-explain").textContent =
-    "同じ月でも年によって価格はけっこう変わるゾウ。線が年ごとの月平均で、太い線がいちばん新しい年ゾウ。いまの時期が「例年より高め／安め」かを見るのに便利ゾウ！";
+    "同じ月でも年によって価格はけっこう変わるゾウ。線が年ごとの月平均で、太い線がいちばん新しい年だゾウ。いまの時期が「例年より高め／安め」かを見るのに便利だゾウ！";
 }
 
 // トレンド：横軸=連続した月、1本線
@@ -515,13 +611,13 @@ function renderCompare(){
   let cls, msg;
   if(ratio <= -0.1){
     cls = "verdict-low";
-    msg = `あすは過去の${moNum}月平均より${Math.abs(diff).toFixed(1)}円ほど安めの見込みゾウ。ねらい目の時間に家事を寄せるとさらにお得ゾウ！`;
+    msg = `あすは過去の${moNum}月平均より${Math.abs(diff).toFixed(1)}円ほど安めの見込みだゾウ。ねらい目の時間に家事を寄せるとさらにお得だゾウ！`;
   } else if(ratio >= 0.1){
     cls = "verdict-high";
-    msg = `あすは過去の${moNum}月平均より${diff.toFixed(1)}円ほど高めの見込みゾウ。安い時間帯を上手に使っていくゾウ！`;
+    msg = `あすは過去の${moNum}月平均より${diff.toFixed(1)}円ほど高めの見込みだゾウ。安い時間帯を上手に使っていくゾウ！`;
   } else {
     cls = "verdict-mid";
-    msg = `あすは過去の${moNum}月平均とだいたい同じくらいの見込みゾウ。いつもどおり安い時間帯がねらい目ゾウ！`;
+    msg = `あすは過去の${moNum}月平均とだいたい同じくらいの見込みだゾウ。いつもどおり安い時間帯がねらい目だゾウ！`;
   }
   verdictEl.className = "compare-verdict " + cls;
   verdictEl.textContent = msg;
