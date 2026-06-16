@@ -94,6 +94,14 @@
   }
   .note{font-size:11px; color:var(--muted); line-height:1.6; text-align:center; margin-top:14px;}
 
+  /* ビジネスアドバイス */
+  .tip-biz{background:#FFFBF0; border-left:3.5px solid var(--amber); border-radius:12px;}
+  .tip-biz .tt{font-size:12.5px;font-weight:700;color:#8B6200;margin-bottom:8px;}
+  .biz-list{margin:0;padding:0;list-style:none;}
+  .biz-list li{font-size:12px;line-height:1.7;color:#5c5346;padding:5px 0 5px 0;
+    border-bottom:1px solid #f0e8d4;display:flex;gap:7px;}
+  .biz-list li:last-child{border-bottom:none;padding-bottom:2px;}
+  .biz-icon{flex:0 0 auto;font-style:normal;font-size:13px;margin-top:1px;}
   /* ビュー切替タブ */
   .view-tabs{display:flex; gap:6px; margin-bottom:14px; background:#efe8dc; padding:4px; border-radius:14px;}
   .view-tab{flex:1; border:none; background:transparent; color:#6b5f54; font-size:13px;
@@ -192,6 +200,10 @@
       <div class="tb" id="p-why"></div>
     </div>
 
+    <div class="tip tip-biz" style="padding:11px 13px 7px;">
+      <div class="tt">🏢 ビジネスの使い時</div>
+      <ul class="biz-list" id="p-biz-list"></ul>
+    </div>
     <div class="note">市場価格（JEPXエリアプライス）の目安です。実際の電気料金には託送料金やTERAの手数料などが加わります。</div>
     </div>
 
@@ -232,13 +244,136 @@
 
 <script>
 const AREA_COPY = {
-  east:{ action:"早朝と深夜が安めの日が多めです。洗濯・食洗機・炊飯予約・EV充電をこの時間に寄せると◎",
-         why:"日中は冷暖房などで電気を使う人が増えて価格が上がるゾウ。早朝や深夜はみんなが休んでいて需要が落ち着くから狙い目だゾウ！" },
-  solar:{ action:"晴れた日のお昼が大チャンス。洗濯・食洗機・お湯わかし・EV充電をお昼に寄せると◎",
-          why:"太陽光発電が多い地域は、晴れたお昼に電気があり余って価格がぐっと下がるゾウ。夕方は太陽が沈んで需要も残るから高くなりやすいゾウ！" },
-  mid:{ action:"朝〜午前と深夜が狙い目。洗濯・食洗機・炊飯予約・EV充電をこの時間に寄せると◎",
-        why:"晴れたお昼は太陽光で価格が下がることがあるゾウ。逆に夕方は仕事や家事が重なって需要が集まり、高くなりやすいゾウ！" },
+  // action は analyzeDay() で動的生成するため削除済み。why だけ残す。
+  east:{ why:"日中は冷暖房などで電気を使う人が増えて価格が上がるゾウ。早朝や深夜はみんなが休んでいて需要が落ち着くから狙い目だゾウ！" },
+  solar:{ why:"太陽光発電が多い地域は、晴れたお昼に電気があり余って価格がぐっと下がるゾウ。夕方は太陽が沈んで需要も残るから高くなりやすいゾウ！" },
+  mid:{ why:"晴れたお昼は太陽光で価格が下がることがあるゾウ。逆に夕方は仕事や家事が重なって需要が集まり、高くなりやすいゾウ！" },
 };
+// =============================================================
+// 動的アドバイス：当日の価格データを解析して具体的な時刻・数値を出す
+// =============================================================
+
+/**
+ * prices（48スロット配列）を解析して主要な特性値を返す。
+ * build_stories.py の calm_band() と同じアルゴリズムを JS で再実装。
+ */
+function analyzeDay(prices) {
+  const minVal = Math.min(...prices);
+  const maxVal = Math.max(...prices);
+  const minI   = prices.indexOf(minVal);
+  const maxI   = prices.indexOf(maxVal);
+
+  // ── 全日おだやか帯（最安値×1.3以下が続く区間）──
+  const ref = minVal * 1.3 + 0.01;
+  let cs = minI, ce = minI;
+  while(cs-1>=0  && prices[cs-1]<=ref) cs--;
+  while(ce+1<48  && prices[ce+1]<=ref) ce++;
+
+  // ── ビジネス時間（8:00〜18:00 = slot16〜36）内の安い帯 ──
+  const BIZ_S=16, BIZ_E=36;
+  const bizSlice = prices.slice(BIZ_S, BIZ_E+1);
+  const bizMin   = Math.min(...bizSlice);
+  const bizMinI  = bizSlice.indexOf(bizMin) + BIZ_S;
+  const bizRef   = bizMin * 1.3 + 0.01;
+  let bcs=bizMinI, bce=bizMinI;
+  while(bcs-1>=BIZ_S && prices[bcs-1]<=bizRef) bcs--;
+  while(bce+1<=BIZ_E && prices[bce+1]<=bizRef) bce++;
+
+  // ── 午前（8〜12時 = slot16〜24）平均 / 夕方（16〜20時 = slot32〜40）平均 ──
+  const amAvg = prices.slice(16,25).reduce((a,b)=>a+b,0)/9;
+  const pmAvg = prices.slice(32,41).reduce((a,b)=>a+b,0)/9;
+  const ratio = pmAvg / amAvg;
+
+  // ── 夕方上昇開始スロット（14:00以降で amAvg×1.25 を2コマ連続超え）──
+  let riseSlot = -1;
+  for(let i=28; i<45; i++){
+    if(prices[i]>=amAvg*1.25 && prices[i+1]>=amAvg*1.2){ riseSlot=i; break; }
+  }
+  // フォールバック: 夕方にピークがある場合はピークの1時間前を上昇開始とみなす
+  const peakIsEvening = maxI >= 32;
+  if(riseSlot<0 && peakIsEvening) riseSlot = Math.max(28, maxI-2);
+
+  return {
+    minVal, maxVal, minI, maxI,
+    calmStart:cs, calmEnd:ce,
+    bizCalmStart:bcs, bizCalmEnd:bce, bizMin,
+    amAvg, pmAvg, ratio,
+    riseSlot, peakIsEvening,
+    flat: (maxVal - minVal) < 3.0   // 3円未満なら「ほぼ横ばい」と判定
+  };
+}
+
+/** 家庭向け狙い目テキストを生成（p-action 用） */
+function buildHomeAction(a) {
+  if(a.flat){
+    return `今日は一日を通じて価格がほぼ安定（最安 ${a.minVal.toFixed(1)}円）。`
+         + `時間帯を選ばず使いやすい一日だゾウ！`;
+  }
+  const band = a.calmEnd > a.calmStart
+    ? `${slotToTime(a.calmStart)}〜${slotToTime(a.calmEnd)}ごろ`
+    : `${slotToTime(a.minI)}ごろ`;
+  return `今日は ${band} が安い帯（最安 ${a.minVal.toFixed(1)}円）。`
+       + `洗濯・食洗機・炊飯予約・EV充電はこの時間に寄せると◎`;
+}
+
+/** ビジネス向けアドバイス4項目を生成（[icon, title, body] の配列） */
+function buildBizItems(a) {
+  const bizBand = a.bizCalmEnd > a.bizCalmStart
+    ? `${slotToTime(a.bizCalmStart)}〜${slotToTime(a.bizCalmEnd)}ごろ`
+    : `${slotToTime(a.bizCalmStart)}ごろ`;
+  const ratioStr = `${Math.round((a.ratio-1)*100)}`;
+
+  // 🌡 エアコン
+  const ac = a.flat
+    ? `今日は価格が比較的横ばい（業務時間内の最安 ${a.bizMin.toFixed(1)}円）。`
+    + `エアコンの運転タイミングは通常どおりでOK`
+    : `業務時間内の安い帯は ${bizBand}（${a.bizMin.toFixed(1)}円）。`
+    + `この時間に予冷・予熱を済ませると、その後の設定を1〜2℃緩めやすい`;
+
+  // 💡 照明
+  let light;
+  if(a.riseSlot >= 0){
+    light = `${slotToTime(a.riseSlot)}ごろから価格が上がり始める見込み。`
+          + `以降は不要な照明を段階的に落とす習慣で電力コストを削減できる`;
+  } else if(a.ratio > 1.15){
+    light = `夕方の価格が午前より約${ratioStr}%高め。`
+          + `17時以降の照明は必要最低限に絞ると◎`;
+  } else {
+    light = `今日は昼夜の価格差が小さめ。照明の省エネは通常の習慣を継続でOK`;
+  }
+
+  // 🏃 早終い
+  let leave;
+  if(a.riseSlot >= 0){
+    // 上昇開始の最低1時間前（2スロット）を提案。上昇開始が早い場合は「直前まで」に読み替え
+    const suggestSlot = Math.max(24, a.riseSlot-2); // slot24=12:00 を下限にして非現実的な時刻を避ける
+    const suggestStr  = suggestSlot < a.riseSlot
+      ? `${slotToTime(suggestSlot)}前後`
+      : `なるべく${slotToTime(a.riseSlot)}前`;
+    leave = `${slotToTime(a.riseSlot)}ごろから価格が上昇見込み。`
+          + `${suggestStr}の退勤シフトを促すと高値帯を避けられる`;
+  } else if(!a.peakIsEvening){
+    leave = `今日のピークは昼間帯（${slotToTime(a.maxI)}ごろ）。`
+          + `夕方は比較的穏やかなので残業時の電力コスト増は限定的`;
+  } else {
+    leave = `夕方の価格が午前より約${ratioStr}%高め。`
+          + `17時前後の退勤シフトでコストを抑えられる`;
+  }
+
+  // ⚡ ピーク管理
+  const peak = a.flat
+    ? `今日は価格が安定傾向。機器のまとめ稼働タイミングは特に制限なし`
+    : `コピー機・給湯器・レンジなどは ${bizBand} にまとめると◎。`
+    + `業務時間内でいちばんコスト効率がよい帯`;
+
+  return [
+    ['🌡','エアコン',    ac],
+    ['💡','照明',        light],
+    ['🏃','早終い',      leave],
+    ['⚡','ピーク管理',  peak],
+  ];
+}
+
 const COPY_MAP = {
   "北海道":"east","東北":"east","東京":"east",
   "中部":"mid","北陸":"mid","関西":"mid",
@@ -399,8 +534,16 @@ function render(){
   lvEl.innerHTML = lv.label + ' <small>最高'+Math.round(hiVal)+'円</small>';
   lvEl.style.background = lv.color;
   const copy = AREA_COPY[COPY_MAP[current]];
-  document.getElementById("p-action").textContent = copy.action;
   document.getElementById("p-why").textContent = copy.why;
+  // 動的アドバイス生成（実データから当日のおだやか帯・上昇開始時刻などを解析）
+  const analysis = analyzeDay(pr);
+  document.getElementById("p-action").textContent = buildHomeAction(analysis);
+  const bizList = document.getElementById("p-biz-list");
+  if(bizList){
+    bizList.innerHTML = buildBizItems(analysis).map(([icon,title,body])=>
+      `<li><i class="biz-icon">${icon}</i><span><b>${title}：</b>${body}</span></li>`
+    ).join('');
+  }
   document.querySelectorAll(".pill").forEach(b=>b.classList.toggle("active", b.dataset.area===current));
   updateDateNav();
 
