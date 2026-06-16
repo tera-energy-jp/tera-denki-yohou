@@ -277,7 +277,7 @@ STORY_CHART = '''
       <div class="chartbox"><div style="height:680px;">{chart}</div>
         <div class="legend">{legend}</div></div>
       <div class="tip tip-good"><span class="tt">&#9786; お得な狙い目</span><span class="tb">{good}</span></div>
-      <div class="foot">&#8596; ほかのエリアの編も スワイプでチェックゾウ</div>
+      <div class="foot">&#8596; ほかのエリアの編も スワイプでチェックだゾウ</div>
     </div>
     <div class="pageno">{pageno}</div>
   </div>'''
