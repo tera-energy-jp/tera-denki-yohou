@@ -8,7 +8,6 @@
 import base64
 import json
 import os
-import random
 import sys
 from alert_config import price_level, yen_approx, HIGH_FLOOR
 
@@ -48,6 +47,59 @@ WHY_POOL = {
         "雨や曇りの日は太陽光が減るから、晴れの日ほどお昼が安くならないゾウ。お天気予報とセットで見るのがコツだゾウ。",
     ],
 }
+
+
+# 電気の豆知識プール（30種類・日替わり）
+# ※ WEB版 index.html の TRIVIA_POOL と完全に同一。
+#   どちらかを編集したら、もう一方も必ず同じ内容に揃えること（同じ日に同じ豆知識を出すため）。
+TRIVIA_POOL = [
+    "電気は「ためておく」のが苦手。使う量と作る量をリアルタイムで合わせる必要があるから、需要が集中する時間帯は価格が上がるんだゾウ。",
+    "日本の電気の周波数は東日本が50Hz、西日本が60Hz。この違いのせいで東西で電気を大量に融通し合うのが難しく、価格差が生まれやすいんだゾウ。",
+    "九州や四国では、晴れた春秋の昼間に太陽光が発電しすぎて電気が余り、市場価格がほぼゼロ円になることがあるゾウ。これを「出力制御」といって、太陽光パネルを一時的に止めることもあるんだゾウ。",
+    "JEPXのスポット市場では、毎朝10時ごろに翌日48コマ分の価格が決まるゾウ。電力会社は前日の夜明けに入札していて、その結果がこの「でんき予報」の元データになってるゾウ。",
+    "電気の「市場価格」と「電気料金」は別物。市場価格はJEPXで決まるけど、実際の料金には託送（電線の使用料）や再エネ賦課金なども加わるゾウ。",
+    "再生可能エネルギーの賦課金は、毎年5月に見直されるゾウ。太陽光の普及が進むほど賦課金も増えてきたけど、最近は電気代の低下傾向もあって複雑な動きをしてるんだゾウ。",
+    "夏の猛暑日は、午後2〜4時に冷房需要がピークになりやすいゾウ。特に東京では気温が1℃上がると電力需要が約100万kW増えるとも言われてるんだゾウ。",
+    "天然ガス（LNG）火力発電はガスのタービンを回して発電するゾウ。起動・停止が柔軟にできる半面、燃料費の変動が電気の市場価格に直接響くんだゾウ。",
+    "原子力発電は一定の出力で24時間動かし続けるのが得意。需要の少ない深夜でも発電を続けるため、夜間の電力価格が低くなりやすい要因の一つだゾウ。",
+    "水力発電は燃料ゼロで発電できるぶん、市場価格が高いときに稼働させると収益が出やすいゾウ。ダムの水を「貯金」して、高値の時間帯に放流するという使い方もされてるんだゾウ。",
+    "揚水発電は、電気が余ったとき（価格が安いとき）に水をくみ上げて位置エネルギーとして蓄え、電気が足りなくなったとき（高いとき）に放流して発電するゾウ。巨大な充電池みたいな役割だゾウ。",
+    "蓄電池の普及が進むと、安い時間帯に充電して高い時間帯に放電・売電する動きが増えるゾウ。これが市場に広がると、価格の高値と安値の差が縮まっていく可能性があるんだゾウ。",
+    "EVの充電は夜間〜早朝に集中させると、電力系統の安定にも貢献できるゾウ。将来はEVの蓄電池を家庭や系統に放電する「V2H」「V2G」という仕組みも広がる見込みだゾウ。",
+    "でんき予報が使っているデータは「エリアプライス」という地域ごとの市場価格。日本には北海道・東北・東京・中部・北陸・関西・中国・四国・九州の9エリアがあって、それぞれ独立した価格がつくゾウ。",
+    "電力の市場取引には、翌日の価格を決める「スポット市場」のほかに、1時間前まで入札できる「時間前市場」もあるゾウ。急な発電機の故障や需要の変動に対応する仕組みだゾウ。",
+    "家庭の電気代に含まれる「燃料費調整額」は、LNGや石炭などの燃料価格の変動を電気代に反映する仕組みだゾウ。国際的な燃料価格が上がると電気代も上がるのはこのためだゾウ。",
+    "太陽光パネルの発電量は気温が上がると少し下がるゾウ。真夏の猛暑日より、涼しい春の晴れの日のほうが発電効率が高いことがあるんだゾウ。",
+    "洋上風力発電は、陸上より風が安定して強いため発電量が大きくなりやすいゾウ。日本でも2030年代に向けて大規模な洋上風力の整備が進んでいるんだゾウ。",
+    "電力の「ベースロード電源」は24時間安定して動かす発電所（原子力・石炭など）、「ピーク電源」は需要の多いときだけ動かす発電所（ガスタービンなど）のことだゾウ。",
+    "停電せずに電気を使えるのは、発電所・送電線・変電所の組み合わせが絶えず需要と供給をぴったり合わせているからだゾウ。この調整役を担うのが各エリアの「一般送配電事業者」だゾウ。",
+    "日本の電力自由化は2016年4月に低圧（家庭・小規模店舗）向けにも全面開放されたゾウ。TERAのような新電力が参入できるようになったのもこの改革のおかげだゾウ。",
+    "「省エネ」と「節電」は少し違うゾウ。省エネは機器の効率を上げて同じことをより少ない電気でこなすこと、節電は使う量そのものを減らすことだゾウ。両方組み合わせるのが電気代削減の近道だゾウ。",
+    "エアコンの設定温度を1℃変えると、消費電力が約10%変わると言われるゾウ。夏は28℃・冬は20℃が省エネの目安とされてるけど、体感にあわせて無理なく調整するのが大切だゾウ。",
+    "冷蔵庫の消費電力は家庭の電力消費の約15%を占めるゾウ。設定温度を「強」から「中」に変えたり、食品を詰めすぎないようにするだけで節電につながるんだゾウ。",
+    "待機電力（コンセントに差したままの機器が消費する電力）は、家庭全体の電力消費の約6%を占めるとも言われるゾウ。長期不在のときはコンセントを抜くと節電になるんだゾウ。",
+    "LED照明は、白熱電球と比べて消費電力が約85%少なく、寿命は約40倍長いゾウ。初期費用はかかるけど、長い目で見るとコストを大きく下げられるんだゾウ。",
+    "電気料金の「基本料金」は、たとえ1kWhも使わなくても毎月かかるゾウ。契約アンペア数（電流の上限）によって決まることが多く、大きいほど基本料金も高くなるんだゾウ。",
+    "太陽光発電の「FIT（固定価格買取制度）」では、家庭や企業が発電した電気を一定価格で買い取ってもらえるゾウ。この費用は再エネ賦課金として全国の電気利用者が負担しているんだゾウ。",
+    "電力系統の安定を保つため、周波数は常に50Hzか60Hzに保たれているゾウ。発電量が需要を上回ると周波数が上がり、下回ると下がる。これがズレると大停電（ブラックアウト）につながることもあるんだゾウ。",
+    "カーボンニュートラルに向けて、電力部門の脱炭素化が進んでいるゾウ。再エネ比率が上がるほど昼間の価格が下がりやすくなる一方、夜間の供給確保が課題になる「ダックカーブ問題」が世界各地で起きているんだゾウ。",
+]
+
+
+def daily_trivia(date_raw):
+    """日付シードで豆知識を1件選ぶ（同じ日は同じ豆知識）。
+
+    WEB版 index.html の getDailyTrivia と同一アルゴリズム：
+    seed = 各文字コードを a*31+c で畳み込み → abs(seed) % len。
+    seedは10^12程度でJSの安全整数(2^53)に収まるため、両者の結果は完全一致する。
+    """
+    s = (date_raw or "").replace("/", "")
+    if not s:
+        return TRIVIA_POOL[0]
+    seed = 0
+    for ch in s:
+        seed = seed * 31 + ord(ch)
+    return TRIVIA_POOL[abs(seed) % len(TRIVIA_POOL)]
 
 
 def slot_label(i):
@@ -249,23 +301,27 @@ def build(prices_path):
     data = json.load(open(prices_path, encoding="utf-8"))
     date_label = data["date_label"]
     areas = data["areas"]
-    random.seed(data["date_raw"])  # 同じ日は同じ豆知識（日替わり）
     s = national_summary(areas)
 
     stories = ""
     page = 2
     for en, jp, names in GROUPS:
         series = {n: areas[n] for n in names if n in areas}
-        stories += chart_story(en, jp, series, date_label, f"{page} / 5")
+        stories += chart_story(en, jp, series, date_label, f"{page} / 6")
         page += 1
+
+    # きょうの豆知識（日付シードで決定論的に選択／WEB版と完全一致）
+    trivia = daily_trivia(data.get("date_raw", ""))
 
     cover_cloud = CLOUD.replace('class="cloud"', 'class="cloud" style="top:-60px;right:-80px;"')
     close_cloud = CLOUD.replace('class="cloud"', 'class="cloud" style="bottom:60px;left:-120px;width:380px;opacity:.7;"')
+    trivia_cloud = CLOUD.replace('class="cloud"', 'class="cloud" style="top:-40px;right:-90px;width:420px;opacity:.55;"')
     return PAGE.format(
         date_label=date_label, mood=s["mood"], mood_color=s["color"],
         cheap_area=s["cheap_area"], cheap_time=s["cheap_time"], cheap_val=s["cheap_val"],
         hot_line=s["hot_line"], terazou=TERAZOU, header=header(date_label),
-        cover_cloud=cover_cloud, close_cloud=close_cloud, stories=stories)
+        cover_cloud=cover_cloud, close_cloud=close_cloud, stories=stories,
+        trivia=trivia, trivia_cloud=trivia_cloud)
 
 
 STORY_CHART = '''
@@ -344,6 +400,16 @@ PAGE = '''<!DOCTYPE html>
   .linkcue .lc-ico{{flex:0 0 auto;}}
   .linkcue .lc-txt{{text-align:left;}}
   .footnote{{font-size:23px;color:#b3a892;line-height:1.7;font-weight:300;margin-top:30px;}}
+
+  .trivia .pad{{justify-content:space-between;}}
+  .trivia .tv-title{{font-size:74px;font-weight:900;color:#573C2C;line-height:1.42;}}
+  .trivia .tv-title em{{color:#F39A2B;font-style:normal;}}
+  .tv-card{{background:#fff;border-radius:40px;padding:64px 60px;box-shadow:0 8px 30px rgba(243,154,43,.10);
+            display:flex;flex-direction:column;align-items:center;text-align:center;}}
+  .tv-card .tv-zou{{width:240px;height:120px;flex:0 0 auto;margin-bottom:34px;}}
+  .tv-card .tv-body{{font-size:46px;line-height:1.82;color:#5c5346;font-weight:400;}}
+  .trivia .tv-next{{display:inline-flex;align-items:center;gap:14px;background:#FFF3DE;color:#E8800E;
+            font-size:32px;font-weight:700;padding:28px 44px;border-radius:44px;line-height:1.5;}}
 </style></head>
 <body>
 
@@ -366,7 +432,7 @@ PAGE = '''<!DOCTYPE html>
       </div>
       <div><span class="swipe">スワイプして、あなたのエリアへ &#8594;</span></div>
     </div>
-    <div class="pageno">1 / 5</div>
+    <div class="pageno">1 / 6</div>
   </div>
 {stories}
   <div class="slide closing">
@@ -383,11 +449,31 @@ PAGE = '''<!DOCTYPE html>
         <div class="footnote">※市場価格（JEPXエリアプライス）のめやすです。実際の電気料金には託送料金やTERAの手数料などが加わります。</div>
       </div>
     </div>
-    <div class="pageno">5 / 5</div>
+    <div class="pageno">5 / 6</div>
+  </div>
+
+  <div class="slide trivia">
+    {trivia_cloud}
+    <div class="pad">
+      <div>
+        {header}
+        <div class="eyebrow" style="margin-top:30px;">TODAY'S TRIVIA</div>
+        <div class="tv-title" style="margin-top:22px;">きょうの<br>テラゾウ<em>まめ知識</em></div>
+      </div>
+      <div class="tv-card">
+        <div class="tv-zou">{terazou}</div>
+        <div class="tv-body">{trivia}</div>
+      </div>
+      <div>
+        <div class="tv-next">&#128064; あしたのまめ知識も、お楽しみにだゾウ</div>
+        <div class="footnote" style="margin-top:22px;">毎日のでんき予報といっしょに、電気のあれこれを少しずつお届けするゾウ。</div>
+      </div>
+    </div>
+    <div class="pageno">6 / 6</div>
   </div>
 
   <div style="flex-basis:100%;text-align:center;color:#8a7d68;font-size:15px;padding:8px;">
-    ↑ Instagramストーリーズ5枚（各1080×1920）のプレビュー。実投稿はPNG書き出し（render_png.py）。
+    ↑ Instagramストーリーズ6枚（各1080×1920）のプレビュー。実投稿はPNG書き出し（render_png.py）。
   </div>
 </body></html>'''
 

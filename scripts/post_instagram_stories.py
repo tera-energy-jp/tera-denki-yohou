@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-でんき予報の5枚PNGを Instagram Stories に自動投稿するスクリプト。
+でんき予報のPNG（カバー・エリア3枚・クロージング・豆知識の計6枚）を Instagram Stories に自動投稿するスクリプト。
 
 仕組み（Graph API の2段階フロー・各画像ごとに繰り返す）:
   1) コンテナ作成  POST /{ig-user-id}/media   （media_type=STORIES, image_url=公開URL）
