@@ -1,0 +1,85 @@
+name: でんき予報 遅延監視（watchdog）
+# 目的：
+#   でんき予報の配信が「サイレントに遅れている／止まっている」ことを当日中に検知する。
+#   2026/7/4〜のPAT期限切れ事件（cron-job.org が黙って死に、気づくまで3日）への再発防止策。
+#
+# 仕組み：
+#   - 毎日 11:30 JST / 12:30 JST に docs/.last_run を確認
+#   - 未配信 → ⚠️ 警告をSlackへ（原因の当たりどころ付き）
+#   - 配信済みだが完了が 11:00 JST 以降 → 🐢 遅延注意をSlackへ
+#   - 10:4x に正常配信されていれば何も言わない（静かな監視役）
+#
+# 限界（正直に）：
+#   この監視自体も GitHub のネイティブ cron に乗っているため、
+#   GitHub 側が混雑すると警告も数時間遅れることがある。
+#   それでも「当日中に必ず気づける」ことが目的なので割り切る。
+
+on:
+  schedule:
+    - cron: '30 2 * * *'   # 11:30 JST（1回目）
+    - cron: '30 3 * * *'   # 12:30 JST（2回目・保険）
+  workflow_dispatch:        # 手動テスト用
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 30   # .last_run の直近コミット時刻を見るため少し深めに取得
+
+      - name: 配信状況をチェックして必要ならSlackへ警告
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+        run: |
+          TODAY=$(TZ=Asia/Tokyo date +%Y-%m-%d)
+          NOW=$(TZ=Asia/Tokyo date +%H:%M)
+          LAST=$(cat docs/.last_run 2>/dev/null || echo "（ファイルなし）")
+          ACTIONS_URL="https://github.com/${REPO}/actions"
+
+          send_slack () {
+            # $1 = 送信するテキスト（JSONエスケープはpythonに任せる）
+            curl -sS --max-time 30 -X POST -H 'Content-Type: application/json' \
+              --data "$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$1")" \
+              "$SLACK_WEBHOOK_URL"
+          }
+
+          if [ "$LAST" = "$TODAY" ]; then
+            # 配信済み。ただし完了時刻が遅かったら注意を出す
+            COMMIT_TS=$(git log -1 --format=%ct -- docs/.last_run || echo "")
+            if [ -n "$COMMIT_TS" ]; then
+              DONE_HM=$(TZ=Asia/Tokyo date -d "@$COMMIT_TS" +%H:%M)
+              DONE_H=$(TZ=Asia/Tokyo date -d "@$COMMIT_TS" +%H)
+              if [ "$DONE_H" -ge 11 ]; then
+                echo "配信済みだが完了が遅い（$DONE_HM JST）。遅延注意を送信。"
+                MSG=$(printf '%s\n' \
+                  "🐢 *でんき予報 遅延注意*（監視 $NOW JST）" \
+                  "本日（$TODAY）の配信は完了していますが、完了時刻が *$DONE_HM JST* と通常（10:4x）より遅めでした。" \
+                  "cron-job.org のジョブが失敗して予備cronで配信された可能性があります。" \
+                  "→ cron-job.org のダッシュボードを一度確認してください。" \
+                  "$ACTIONS_URL")
+                send_slack "$MSG"
+              else
+                echo "OK: 本日分は $DONE_HM JST に正常配信済み。何もしません。"
+              fi
+            else
+              echo "OK: 本日分は配信済み（時刻不明）。何もしません。"
+            fi
+            exit 0
+          fi
+
+          echo "未配信を検知（.last_run: $LAST）。警告を送信します。"
+          MSG=$(printf '%s\n' \
+            "⚠️ *でんき予報 未配信の警告*（監視 $NOW JST）" \
+            "本日（$TODAY）の配信がまだ完了していません（.last_run: $LAST）。" \
+            "考えられる原因：" \
+            "• cron-job.org のジョブ失敗／自動無効化（PATの期限切れ・権限不足）" \
+            "• GitHub Actions ネイティブcron の大幅遅延" \
+            "• JEPXデータ取得や Instagram 投稿の失敗" \
+            "→ まず cron-job.org のダッシュボード、次に Actions の実行ログを確認してください。" \
+            "$ACTIONS_URL")
+          send_slack "$MSG"
