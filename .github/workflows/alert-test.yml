@@ -1,0 +1,75 @@
+name: 価格アラート 手動テスト（Drive＋Slack）
+# 手動専用の検証ワークフロー。build_alerts → 認証 → Drive格納 → Slack通知 だけを動かす。
+# Instagram投稿・docsコミットは一切行わない（本番配信・GitHub Pagesに影響なし）。
+# 既定では「テスト用ダミー価格（関西が必ず警戒発火）」で実行する。
+# 本番の docs/prices.json で確認したいときは use_real_prices=true。
+on:
+  workflow_dispatch:
+    inputs:
+      use_real_prices:
+        description: '本番 docs/prices.json で判定（false=テスト用ダミーで必ず発火）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write        # Workload Identity のOIDCトークン発行に必要
+
+concurrency:
+  group: price-alert-test
+  cancel-in-progress: false
+
+jobs:
+  alert-test:
+    runs-on: ubuntu-latest
+    env:
+      ALERT_OUT_DIR: ${{ github.workspace }}/_alerts_out
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 依存インストール（Google API）
+        run: pip install google-auth google-api-python-client
+      - name: 使用する価格ファイルを決定（ダミー or 本番）
+        id: prices
+        run: |
+          if [ "${{ inputs.use_real_prices }}" = "true" ]; then
+            echo "path=docs/prices.json" >> "$GITHUB_OUTPUT"
+            echo "本番 docs/prices.json を使用します。"
+          else
+            python - <<'PY'
+          import json, datetime
+          jst = datetime.timezone(datetime.timedelta(hours=9))
+          stamp = datetime.datetime.now(jst).strftime('%Y%m%d-%H%M')
+          kansai = [20.0]*48
+          kansai[36] = 72.0   # 18:00コマ 72円 → 関西=警戒で必ず発火
+          data = {"date_label": f"【テスト配信】{stamp}",
+                  "date_raw": f"TEST-{stamp}",
+                  "areas": {"関西": kansai}}
+          open("test_prices.json","w",encoding="utf-8").write(json.dumps(data,ensure_ascii=False))
+          print("テスト用ダミー価格を生成:", data["date_raw"])
+          PY
+            echo "path=test_prices.json" >> "$GITHUB_OUTPUT"
+          fi
+      - name: 判定＆本文生成
+        env:
+          ALERT_PRICES_JSON: ${{ steps.prices.outputs.path }}
+        run: python scripts/build_alerts.py "${{ steps.prices.outputs.path }}"
+      - name: Google Cloud 認証（Workload Identity・キーレス）
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: 発火物を Google Drive へ格納
+        env:
+          ALERT_PRICES_JSON: ${{ steps.prices.outputs.path }}
+          ALERT_DRIVE_PARENT_ID: ${{ secrets.ALERT_DRIVE_PARENT_ID }}
+        run: python scripts/upload_alerts_drive.py
+      - name: Slack へ発火通知
+        env:
+          ALERT_PRICES_JSON: ${{ steps.prices.outputs.path }}
+          SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
+        run: python scripts/notify_alert_slack.py
