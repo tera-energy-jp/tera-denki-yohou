@@ -33,11 +33,17 @@ def _out_root():
     return Path(os.environ.get("ALERT_OUT_DIR", REPO / "_alerts_out"))
 
 
+def _prices_json():
+    """判定に使った prices.json のパス。ALERT_PRICES_JSON 最優先、既定 docs/prices.json。"""
+    pj = os.environ.get("ALERT_PRICES_JSON", "").strip()
+    return Path(pj) if pj else (REPO / "docs" / "prices.json")
+
+
 def _today_slug():
-    """対象日（翌日）のスラッグ YYYYMMDD。docs/prices.json 優先、無ければ最新フォルダ。"""
-    prices = REPO / "docs" / "prices.json"
-    if prices.exists():
-        data = json.loads(prices.read_text(encoding="utf-8"))
+    """対象日のスラッグ YYYYMMDD。ALERT_PRICES_JSON→docs/prices.json→最新フォルダの順。"""
+    pj = _prices_json()
+    if pj.exists():
+        data = json.loads(pj.read_text(encoding="utf-8"))
         slug = data.get("date_raw", "").replace("/", "")
         if slug:
             return slug

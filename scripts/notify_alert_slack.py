@@ -26,10 +26,17 @@ def _out_root():
     return Path(os.environ.get("ALERT_OUT_DIR", REPO / "_alerts_out"))
 
 
+def _prices_json():
+    """判定に使った prices.json のパス。ALERT_PRICES_JSON 最優先、既定 docs/prices.json。"""
+    pj = os.environ.get("ALERT_PRICES_JSON", "").strip()
+    return Path(pj) if pj else (REPO / "docs" / "prices.json")
+
+
 def _today_slug():
-    prices = REPO / "docs" / "prices.json"
-    if prices.exists():
-        data = json.loads(prices.read_text(encoding="utf-8"))
+    """対象日のスラッグ YYYYMMDD。ALERT_PRICES_JSON→docs/prices.json→最新フォルダの順。"""
+    pj = _prices_json()
+    if pj.exists():
+        data = json.loads(pj.read_text(encoding="utf-8"))
         slug = data.get("date_raw", "").replace("/", "")
         if slug:
             return slug
@@ -73,9 +80,9 @@ def main():
         drive_url = p.read_text(encoding="utf-8").strip()
 
     date_label = slug
-    prices = REPO / "docs" / "prices.json"
-    if prices.exists():
-        date_label = json.loads(prices.read_text(encoding="utf-8")).get("date_label", slug)
+    pj = _prices_json()
+    if pj.exists():
+        date_label = json.loads(pj.read_text(encoding="utf-8")).get("date_label", slug)
 
     lines = [f"*⚡ 価格アラート発火* — 対象日 {date_label}", ""]
     for area, label, subject in items:
