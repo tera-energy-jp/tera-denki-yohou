@@ -19,6 +19,7 @@ google-github-actions/auth（Workload Identity Federation）が ADC を用意す
   （notify_alert_slack.py がこれを読んで Slack にリンクを載せる）
 """
 import os
+import re
 import json
 from pathlib import Path
 
@@ -27,6 +28,21 @@ REPO = SCRIPT_DIR.parent
 
 DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder"
 SCOPES = ["https://www.googleapis.com/auth/drive"]
+
+
+def _extract_folder_id(raw):
+    """URL貼り付けや ?usp= 付きにも耐える。folders/<id> / ?id=<id> / 素のID を受ける。"""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    m = re.search(r"/folders/([A-Za-z0-9_-]+)", raw)
+    if m:
+        return m.group(1)
+    m = re.search(r"[?&]id=([A-Za-z0-9_-]+)", raw)
+    if m:
+        return m.group(1)
+    m = re.match(r"([A-Za-z0-9_-]+)", raw)
+    return m.group(1) if m else raw
 
 
 def _out_root():
@@ -53,7 +69,8 @@ def _today_slug():
 
 
 def main():
-    parent_id = os.environ.get("ALERT_DRIVE_PARENT_ID", "").strip()
+    parent_raw = os.environ.get("ALERT_DRIVE_PARENT_ID", "")
+    parent_id = _extract_folder_id(parent_raw)
     slug = _today_slug()
     day_dir = _out_root() / slug if slug else None
 
@@ -88,6 +105,21 @@ def main():
         return
 
     service = build("drive", "v3", credentials=creds, cache_discovery=False)
+
+    # 親フォルダに到達できるか事前確認（分かりやすいエラーにする）
+    try:
+        info = service.files().get(
+            fileId=parent_id, fields="id, name", supportsAllDrives=True
+        ).execute()
+        print(f"[upload] 親フォルダ確認OK: 「{info.get('name')}」({parent_id})")
+    except Exception as e:
+        print("[upload][ERROR] 親フォルダにアクセスできません。")
+        print(f"  抽出したフォルダID: {parent_id!r}（元の値: {len(parent_raw)}文字）")
+        print("  次を確認してください:")
+        print("   ① フォルダIDが正しいか（DriveのURL .../folders/ の直後の文字列）")
+        print("   ② そのフォルダを price-alert-bot@tera-price-alert.iam.gserviceaccount.com")
+        print("      に「編集者」で共有しているか")
+        raise
 
     # 日付サブフォルダを作成（親フォルダの下、共有ドライブ対応）
     folder = service.files().create(
