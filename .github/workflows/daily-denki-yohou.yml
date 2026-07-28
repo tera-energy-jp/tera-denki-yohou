@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: write   # 生成したPNG/JSONを docs/ にコミットするため
+  id-token: write   # Workload Identity のOIDCトークン発行に必要（価格アラート配信）
 
 # 同じ日に複数トリガが重なっても、絶対に同時並走させない（重複投稿の最後の砦）。
 # 走っている分が終わってから次が動き、そのとき改めてガード判定し直す。
@@ -74,9 +75,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: 依存インストール（Playwright + Chromium + requests）
+      - name: 依存インストール（Playwright + Chromium + requests + Google API）
         run: |
-          pip install playwright requests
+          pip install playwright requests google-auth google-api-python-client
           playwright install --with-deps chromium
       - name: ⓪ JEPXから最新CSVを取得
         run: python scripts/fetch_jepx.py
@@ -106,6 +107,32 @@ jobs:
           cp prices.json   docs/prices.json
           [ -f history.json ] && cp history.json docs/history.json || true
           [ -f monthly.json ] && cp monthly.json docs/monthly.json || true
+      # ───────── 価格アラート：発火時に Drive 格納 ＋ Slack 通知（キーレス）─────────
+      # 4ステップとも continue-on-error。失敗してもでんき予報本体は止めない。
+      # 発火が無い日・Secretsが未登録の項目は、安全にスキップ（狼少年化しない）。
+      - name: ④-A 価格アラート判定＆本文生成（発火時のみ _alerts_out/ に出力）
+        continue-on-error: true
+        env:
+          ALERT_OUT_DIR: ${{ github.workspace }}/_alerts_out
+        run: python scripts/build_alerts.py docs/prices.json
+      - name: ④-B Google Cloud 認証（Workload Identity・キーレス）
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: ④-C 発火物を Google Drive へ格納
+        continue-on-error: true
+        env:
+          ALERT_OUT_DIR: ${{ github.workspace }}/_alerts_out
+          ALERT_DRIVE_PARENT_ID: ${{ secrets.ALERT_DRIVE_PARENT_ID }}
+        run: python scripts/upload_alerts_drive.py
+      - name: ④-D Slack へ発火通知
+        continue-on-error: true
+        env:
+          ALERT_OUT_DIR: ${{ github.workspace }}/_alerts_out
+          SLACK_ALERT_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
+        run: python scripts/notify_alert_slack.py
       - name: ⑤ コミット＆プッシュ（GitHub Pages 公開）
         run: |
           git config user.name  "tera-denki-bot"
