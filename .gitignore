@@ -5,3 +5,4 @@ __pycache__/
 /prices.json
 /history.json
 /monthly.json
+/_alerts_out/
