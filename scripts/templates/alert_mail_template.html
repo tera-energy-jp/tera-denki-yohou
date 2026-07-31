@@ -18,7 +18,8 @@
     {{AREA}}         エリア名
     {{DATE}}         対象日（例: 2026年7月10日(金)）
     {{PEAK}}         日内最高値（例: 約72円）
-    {{PEAK_TIME}}    高い時間帯（例: 18:00 〜 18:30）
+    {{PEAK_TIME}}    高い時間帯・閾値超過帯を全列挙（例: 18:30 〜 21:00、22:30 〜 23:00）
+    {{PEAK_AT}}      日内最高値が出る時刻（例: 19:00）
     {{HEAD}}         段階別リード文
     {{ADVICE}}       段階別アドバイス
 -->
@@ -63,8 +64,8 @@
             <td style="padding:10px 24px 4px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F0E9; border-radius:12px;">
                 <tr><td style="padding:14px 18px;">
-                  <span style="font-size:12px; color:#8A8178;">特に高い時間帯</span><br>
-                  <span style="font-size:18px; color:{{LEVEL_COLOR}}; font-weight:bold;">{{PEAK_TIME}} ごろ</span>
+                  <span style="font-size:12px; color:#8A8178;">高い時間帯（この水準を超える時間）</span><br>
+                  <span style="font-size:18px; color:{{LEVEL_COLOR}}; font-weight:bold;">{{PEAK_TIME}}</span><br><span style="font-size:12px; color:#8A8178;">最高値は {{PEAK_AT}} ごろ</span>
                 </td></tr>
               </table>
             </td>
