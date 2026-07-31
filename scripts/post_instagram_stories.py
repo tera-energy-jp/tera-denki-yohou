@@ -85,6 +85,42 @@ def publish(creation_id):
     return r.json()["id"]
 
 
+STATE_FILE = ".ig_state.json"
+
+
+def delivery_date_key():
+    """進捗ファイルのキー。配信日（prices.json の date_raw）で日替わりリセットする。"""
+    try:
+        with open("prices.json", encoding="utf-8") as f:
+            return json.load(f)["date_raw"].replace("/", "")
+    except Exception:
+        return "unknown"
+
+
+def load_posted(date_key):
+    """すでに投稿済みの {画像名: media_id} を返す。日付が変わっていれば空。
+
+    ⑧が途中で落ちた日に、次の起動が1枚目から投稿し直して
+    Storiesに二重投稿されるのを防ぐための進捗記録。
+    """
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            st = json.load(f)
+    except Exception:
+        return {}
+    if st.get("date") != date_key:
+        return {}
+    return st.get("posted", {}) or {}
+
+
+def save_posted(date_key, posted):
+    """1枚公開するごとに呼ぶ。途中で落ちても進捗が残るよう即時に書く。"""
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"date": date_key, "posted": posted}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, STATE_FILE)
+
+
 def cache_buster():
     """画像URLに付けるバージョン文字列（その日の配信日付）。
 
@@ -107,9 +143,17 @@ def main():
         sys.exit(1)
 
     ver = cache_buster()
+    date_key = delivery_date_key()
+    posted = load_posted(date_key)
+    if posted:
+        print(f"※前回の実行で {len(posted)}枚 が投稿済みです（{date_key}）。残りだけ投稿します。")
     print(f"=== Instagram Stories 投稿開始（{len(files)}枚 / v={ver}） ===")
+    newly = 0
     for i, path in enumerate(files, 1):
         name = os.path.basename(path)
+        if name in posted:
+            print(f"[{i}/{len(files)}] {name} → 投稿済みのためスキップ（media_id={posted[name]}）")
+            continue
         image_url = f"{PAGES_BASE_URL}/stories/{name}?v={ver}"
         print(f"[{i}/{len(files)}] {name} → {image_url}")
 
@@ -118,11 +162,19 @@ def main():
         media_id = publish(creation_id)
         print(f"    公開完了 media_id={media_id}")
 
+        # 1枚ごとに進捗を保存する。ここで落ちても、次の起動は残りだけを投稿する。
+        posted[name] = media_id
+        save_posted(date_key, posted)
+        newly += 1
+
         # 連続投稿のレート対策（最後の1枚の後は待たない）
         if i < len(files):
             time.sleep(5)
 
-    print("=== 全Storiesの投稿が完了しました ===")
+    if newly == 0:
+        print("=== すべて投稿済みでした（新規投稿なし） ===")
+    else:
+        print(f"=== Storiesの投稿が完了しました（新規{newly}枚 / 全{len(files)}枚） ===")
 
 
 if __name__ == "__main__":
