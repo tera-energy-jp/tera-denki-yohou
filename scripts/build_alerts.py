@@ -49,9 +49,9 @@ def peak_window(prices):
 
 # --- 段階別の文面パーツ（叩き台。最終文言・フッターは追って確定） -----------
 _HEAD = {
-    2: "明日は電力価格が高くなりそうです。",
-    3: "明日は電力価格がかなり高くなる見込みです。",
-    4: "【重要】明日は電力価格が極端に高騰する見込みです。",
+    2: "明日は電力価格が高くなります。",
+    3: "明日は電力価格がかなり高くなります。",
+    4: "【重要】明日は電力価格が極端に高騰します。",
 }
 _ADVICE = {
     2: "電気を多く使う家事や設備の稼働を、価格が落ち着く時間帯に少しずらしていただくと、負担をやわらげられます。",
@@ -62,15 +62,15 @@ _ADVICE = {
 
 def build_body(area, level, label, peak, start, end, date_label):
     """配配に貼り付ける 件名・本文（プレーンテキスト叩き台）を返す。"""
-    yen = cfg.yen_approx(peak)  # 「約XX円」
+    yen = f"{peak:.2f}円"  # 確定値なので約なし・小数2桁（JEPX刻みと一致）
     subject = f"【テラエナジーでんき】{label}：明日 {date_label} {area}エリアの電力価格にご注意ください"
     body = f"""{area}エリアのお客さまへ
 
 {_HEAD[level]}
-{date_label}の{area}エリアは、電力価格が高くなると予測されています。
+{date_label}の{area}エリアは、下記の価格水準となることが確定しています。
 
-■ 予測される価格水準（目安）
-　日内最高値：{yen}/kWh 前後
+■ 確定した価格水準（JEPXエリアプライス）
+　日内最高値：{yen}/kWh
 　特に高い時間帯：{start} 〜 {end} ごろ
 
 ■ おすすめの過ごし方
@@ -82,8 +82,9 @@ def build_body(area, level, label, peak, start, end, date_label):
 ──────────────────────
 このメールは、市場連動プランをご契約のお客さまに、電気料金に関わる
 価格情報としてお送りしています（広告メールではありません）。
-価格は JEPX（日本卸電力取引所）のエリアプライスにもとづく目安で、
-実際の料金を保証するものではありません。
+上記は JEPX（日本卸電力取引所）のエリアプライス（税抜）にもとづく確定値です。
+実際のご請求額は、このエリアプライスに送電ロスを加味し、託送料金・
+再エネ発電賦課金・容量拠出金・弊社手数料を加えて算出されます。
 
 TERA Energy株式会社　テラエナジーでんき
 """
@@ -98,7 +99,7 @@ def build_html_body(area, level, label, peak, start, end, date_label):
         "LEVEL_LABEL": label,
         "AREA": area,
         "DATE": date_label,
-        "PEAK": cfg.yen_approx(peak),
+        "PEAK": f"{peak:.2f}円",
         "PEAK_TIME": f"{start} 〜 {end}",
         "HEAD": _HEAD[level],
         "ADVICE": _ADVICE[level],
