@@ -40,11 +40,29 @@ def slot_to_time(slot):
     return f"{h:02d}:{m:02d}"
 
 
+def high_windows(prices, floor):
+    """しきい値 floor 以上が続く時間帯を、連続する区間ごとに列挙して返す。
+
+    最高値の1コマ（30分）だけを示すと、実際には数時間高い日でも
+    「30分だけ高い」と誤解させてしまうため、超過している帯を全部返す。
+    離れた区間（例: 早朝と深夜）は繋げず別区間として扱う。
+    戻り値: ["18:30 〜 21:00", ...]
+    """
+    idx = [i for i, v in enumerate(prices) if v >= floor]
+    runs = []
+    for i in idx:
+        if runs and i == runs[-1][-1] + 1:
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    return [f"{slot_to_time(r[0])} 〜 {slot_to_time(r[-1] + 1)}" for r in runs]
+
+
 def peak_window(prices):
-    """日内最高値と、その30分コマの時間帯（開始〜終了）を返す。"""
+    """日内最高値と、それが出る30分コマの開始時刻を返す。"""
     peak = max(prices)
     idx = prices.index(peak)
-    return peak, slot_to_time(idx), slot_to_time(idx + 1)
+    return peak, slot_to_time(idx)
 
 
 # --- 段階別の文面パーツ（叩き台。最終文言・フッターは追って確定） -----------
@@ -60,9 +78,10 @@ _ADVICE = {
 }
 
 
-def build_body(area, level, label, peak, start, end, date_label):
+def build_body(area, level, label, peak, peak_at, windows, date_label):
     """配配に貼り付ける 件名・本文（プレーンテキスト叩き台）を返す。"""
     yen = f"{peak:.2f}円"  # 確定値なので約なし・小数2桁（JEPX刻みと一致）
+    win = "、".join(windows)  # 閾値以上の帯をすべて列挙
     subject = f"【テラエナジーでんき】{label}：明日 {date_label} {area}エリアの電力価格にご注意ください"
     body = f"""{area}エリアのお客さまへ
 
@@ -70,8 +89,8 @@ def build_body(area, level, label, peak, start, end, date_label):
 {date_label}の{area}エリアは、下記の価格水準となることが確定しています。
 
 ■ 確定した価格水準（JEPXエリアプライス）
-　日内最高値：{yen}/kWh
-　特に高い時間帯：{start} 〜 {end} ごろ
+　日内最高値：{yen}/kWh（{peak_at} ごろ）
+　高い時間帯：{win}
 
 ■ おすすめの過ごし方
 　{_ADVICE[level]}
@@ -91,7 +110,7 @@ TERA Energy株式会社　テラエナジーでんき
     return subject, body
 
 
-def build_html_body(area, level, label, peak, start, end, date_label):
+def build_html_body(area, level, label, peak, peak_at, windows, date_label):
     """配配のHTMLメールエディタに貼り付ける HTML本文を返す。"""
     html = TEMPLATE_PATH.read_text(encoding="utf-8")
     repl = {
@@ -100,7 +119,8 @@ def build_html_body(area, level, label, peak, start, end, date_label):
         "AREA": area,
         "DATE": date_label,
         "PEAK": f"{peak:.2f}円",
-        "PEAK_TIME": f"{start} 〜 {end}",
+        "PEAK_TIME": "、".join(windows),
+        "PEAK_AT": peak_at,
         "HEAD": _HEAD[level],
         "ADVICE": _ADVICE[level],
     }
@@ -117,29 +137,31 @@ def main():
     areas = data["areas"]
 
     # 全エリア判定
-    results = []  # (area, lv, label, peak, start, end, push)
+    results = []  # (area, lv, label, peak, peak_at, windows, push)
     for area, prices in areas.items():
-        peak, start, end = peak_window(prices)
+        peak, peak_at = peak_window(prices)
         lv, label = cfg.alert_level(area, peak)
         push, _, _ = cfg.should_push_mail(area, peak)
-        results.append((area, lv, label, peak, start, end, push))
+        # 「高い時間帯」の下限は、そのエリアで顧客に知らせる基準＝注意しきい値に揃える。
+        windows = high_windows(prices, cfg.NOTICE_THRESHOLDS.get(area, peak))
+        results.append((area, lv, label, peak, peak_at, windows, push))
 
     fired = [r for r in results if r[6]]  # Lv2（注意）以上＝プッシュ対象
 
     out_dir = ALERTS_ROOT / date_slug
     if fired:
         out_dir.mkdir(parents=True, exist_ok=True)
-        for area, lv, label, peak, start, end, _ in fired:
-            subject, body = build_body(area, lv, label, peak, start, end, date_label)
+        for area, lv, label, peak, peak_at, windows, _ in fired:
+            subject, body = build_body(area, lv, label, peak, peak_at, windows, date_label)
             (out_dir / f"{area}_{label}.txt").write_text(
                 f"件名: {subject}\n\n{body}", encoding="utf-8")
-            html = build_html_body(area, lv, label, peak, start, end, date_label)
+            html = build_html_body(area, lv, label, peak, peak_at, windows, date_label)
             (out_dir / f"{area}_{label}.html").write_text(html, encoding="utf-8")
 
     # サマリー
     L = [f"=== 価格アラート判定  {date_label}  ({prices_path.name}) ===", ""]
     L.append("[全エリア判定]（日内最高値・税抜エリアプライス）")
-    for area, lv, label, peak, start, end, push in results:
+    for area, lv, label, peak, peak_at, windows, push in results:
         mark = "★送信" if push else "  —"
         L.append(f"  {area:<4} 最高 {peak:>7.2f}円  Lv{lv} {label:<4} {mark}")
     L.append("")
