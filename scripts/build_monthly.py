@@ -188,7 +188,7 @@ def main():
         out = merge()
 
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
+        json.dump(out, f, ensure_ascii=False, indent=2)
 
     n = len(out["months"])
     span = f"{out['months'][0]} 〜 {out['months'][-1]}" if out["months"] else "-"

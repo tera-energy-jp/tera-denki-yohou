@@ -120,7 +120,7 @@ def main():
     out = build(csv_path, max_days)
 
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, separators=(",", ":"))  # 圧縮形式で出力
+        json.dump(out, f, ensure_ascii=False, indent=2)
 
     n = len(out["dates"])
     oldest = out["dates"][-1] if out["dates"] else "-"
