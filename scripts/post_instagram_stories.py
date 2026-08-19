@@ -55,34 +55,89 @@ def create_container(image_url):
     return r.json()["id"]
 
 
-def wait_finished(creation_id, tries=10, interval=3):
-    """② コンテナの処理が FINISHED になるまで待つ"""
+def wait_finished(creation_id, tries=20, interval=3, settle=3):
+    """② コンテナの処理が FINISHED になるまで待つ
+
+    【2026-08 修正】
+    FINISHED は「publish が通る保証」ではない。Meta の status_code は
+    結果整合のため、FINISHED 直後に publish を叩くと 9007
+    （Media ID is not available）が返ることがある。
+      - FINISHED 確認後に settle 秒だけ間を置く
+      - 待ちの上限を 30秒 → 60秒 に延長
+      - 状態確認GETの失敗を黙って素通りさせず警告を出す
+    """
+    last = None
     for _ in range(tries):
-        s = requests.get(
+        r = requests.get(
             f"{API}/{creation_id}",
-            params={"fields": "status_code", "access_token": ACCESS_TOKEN},
+            params={"fields": "status_code,status", "access_token": ACCESS_TOKEN},
             timeout=30,
-        ).json()
-        code = s.get("status_code")
-        if code == "FINISHED":
+        )
+        if not r.ok:
+            print(f"    [警告] 状態確認に失敗: {r.status_code} {r.text}", file=sys.stderr)
+            time.sleep(interval)
+            continue
+
+        s = r.json()
+        last = s.get("status_code")
+
+        if last == "FINISHED":
+            time.sleep(settle)
             return True
-        if code == "ERROR":
-            raise RuntimeError(f"コンテナ処理エラー: {s}")
+        if last in ("ERROR", "EXPIRED"):
+            raise RuntimeError(f"コンテナ処理エラー({last}): {s}")
+
         time.sleep(interval)
-    raise TimeoutError(f"コンテナが時間内にFINISHEDになりませんでした: {creation_id}")
 
-
-def publish(creation_id):
-    """③ コンテナを公開し、投稿された media_id を返す"""
-    r = requests.post(
-        f"{API}/{IG_USER_ID}/media_publish",
-        data={"creation_id": creation_id, "access_token": ACCESS_TOKEN},
-        timeout=60,
+    raise TimeoutError(
+        f"コンテナが時間内にFINISHEDになりませんでした: {creation_id} (last={last})"
     )
-    if not r.ok:
+
+
+def publish(creation_id, tries=5, base_wait=8):
+    """③ コンテナを公開し、投稿された media_id を返す
+
+    【2026-08 修正】
+    9007 / subcode 2207027（Media ID is not available）のときだけ
+    一時エラーとみなして指数バックオフで再試行する。
+    待ち時間: 8秒 → 16秒 → 32秒 → 64秒（最大 約2分）
+    それ以外のエラー（トークン切れ等）は従来どおり即座に失敗させる。
+    """
+    for attempt in range(1, tries + 1):
+        r = requests.post(
+            f"{API}/{IG_USER_ID}/media_publish",
+            data={"creation_id": creation_id, "access_token": ACCESS_TOKEN},
+            timeout=60,
+        )
+        if r.ok:
+            if attempt > 1:
+                print(f"    {attempt}回目の試行で公開成功")
+            return r.json()["id"]
+
+        code = subcode = None
+        try:
+            err = r.json().get("error", {})
+            code = err.get("code")
+            subcode = err.get("error_subcode")
+        except ValueError:
+            pass
+
+        is_not_ready = (code == 9007) or (subcode == 2207027)
+
+        if is_not_ready and attempt < tries:
+            wait = base_wait * (2 ** (attempt - 1))
+            print(
+                f"    [警告] 公開の準備が未完了(9007)。{wait}秒待って再試行 "
+                f"({attempt}/{tries - 1})",
+                file=sys.stderr,
+            )
+            time.sleep(wait)
+            continue
+
         print(f"[エラー] 公開に失敗: {r.status_code} {r.text}", file=sys.stderr)
         r.raise_for_status()
-    return r.json()["id"]
+
+    raise RuntimeError(f"9007 が {tries} 回続いたため中断: {creation_id}")
 
 
 STATE_FILE = ".ig_state.json"
