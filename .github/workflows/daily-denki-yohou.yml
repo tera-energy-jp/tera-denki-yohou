@@ -135,13 +135,24 @@ jobs:
         run: python scripts/notify_alert_slack.py
       - name: ⑤ コミット＆プッシュ（GitHub Pages 公開）
         run: |
+          set -euo pipefail
           git config user.name  "tera-denki-bot"
           git config user.email "bot@users.noreply.github.com"
+
           git add docs/ data/spot_summary.csv
-          git diff --cached --quiet && echo "変更なし（スキップ）" \
-            || git commit -m "でんき予報 $(TZ=Asia/Tokyo date +%Y-%m-%d) [skip ci]"
-          git push origin HEAD:main \
-            || (git pull --rebase --autostash origin main && git push origin HEAD:main)
+          git diff --cached --quiet && { echo "変更なし（スキップ）"; exit 0; }
+
+          git commit -m "でんき予報 $(TZ=Asia/Tokyo date +%Y-%m-%d) [skip ci]"
+
+          # rebase せず、衝突時は「リモート優先で対象ファイルだけ再適用」して再push
+          git push origin HEAD:main || {
+            echo "push競合: origin/main を取り込み、生成物のみ再適用して再試行"
+            git fetch origin main
+            git reset --hard origin/main
+            git add docs/ data/spot_summary.csv
+            git diff --cached --quiet || git commit -m "でんき予報 $(TZ=Asia/Tokyo date +%Y-%m-%d) [skip ci]"
+            git push origin HEAD:main
+          }
       - name: ⑥ Pages 反映待ち（prices.json の日付で実確認）
         # 固定 sleep だとデプロイ遅延時に旧画像をIG側が掴むため、
         # 公開URLの prices.json が今回の日付になるまでポーリングする（最大5分）。
@@ -191,12 +202,17 @@ jobs:
           git add .ig_state.json
           git diff --cached --quiet && echo "進捗の変更なし（スキップ）" \
             || git commit -m "IG投稿の進捗を保存 $(TZ=Asia/Tokyo date +%Y-%m-%d) [skip ci]"
-          git push origin HEAD:main \
-            || (git pull --rebase --autostash origin main && git push origin HEAD:main)
+          git push origin HEAD:main || {
+            git fetch origin main
+            git reset --hard origin/main
+            [ -f .ig_state.json ] && git add .ig_state.json
+            git diff --cached --quiet || git commit -m "IG投稿の進捗を保存 $(TZ=Asia/Tokyo date +%Y-%m-%d) [skip ci]"
+            git push origin HEAD:main
+          }
       - name: ⑨ 配信済みマーカーを記録（IG投稿の成功後のみ）
         # ここまで到達＝Instagram投稿まで成功。マーカーを書いて当日分を完了扱いに。
         # 既に今日の日付なら commit をスキップ（旧版は exit 1 で赤くなっていた）。
-        # push が競合した場合は rebase してから再push（同時起動への保険）。
+        # push が競合した場合は remote 優先で再試行（rebaseしない）。
         run: |
           TZ=Asia/Tokyo date +%Y-%m-%d > docs/.last_run
           git config user.name  "tera-denki-bot"
@@ -204,8 +220,14 @@ jobs:
           git add docs/.last_run
           git diff --cached --quiet && echo "マーカー変更なし（既に記録済み）" \
             || git commit -m "配信済みマーカー $(TZ=Asia/Tokyo date +%Y-%m-%d) [skip ci]"
-          git push origin HEAD:main \
-            || (git pull --rebase --autostash origin main && git push origin HEAD:main)
+          git push origin HEAD:main || {
+            git fetch origin main
+            git reset --hard origin/main
+            TZ=Asia/Tokyo date +%Y-%m-%d > docs/.last_run
+            git add docs/.last_run
+            git diff --cached --quiet || git commit -m "配信済みマーカー $(TZ=Asia/Tokyo date +%Y-%m-%d) [skip ci]"
+            git push origin HEAD:main
+          }
       - name: ⑩ Slack へ通知（安否確認・失敗しても本体に影響させない）
         if: always()              # 途中のステップが失敗した日こそ必ず通知する
         continue-on-error: true   # Slack自体の失敗でジョブを赤にしない
