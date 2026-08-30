@@ -3,8 +3,12 @@
 notify_alert_slack.py — 価格アラート発火を Slack へ通知（Incoming Webhook）
 --------------------------------------------------------------------------
 build_alerts.py の当日発火フォルダを見て、発火があれば Slack へ
-「対象日・エリア・レベル・件名・Driveリンク」を通知する。
+「対象日・エリア・レベル・最高値/最安値・件名・Driveリンク」を通知する。
 発火が無い日は何も送らない（狼少年化させない）。
+
+最高値・最安値は prices.json（判定に使ったのと同じファイル）から直接計算する。
+サマリーのドキュメントを開かなくても、Slack通知だけで水準が分かるようにするため
+（2026-08 現場フィードバック反映）。
 
 Webhook は添付非対応のため、本文HTMLは Drive リンク先から開く運用。
 追加ライブラリ不要（標準の urllib のみ）。
@@ -60,6 +64,20 @@ def _collect(day_dir):
     return items
 
 
+def _price_stats():
+    """エリア別の（日内最高値, 日内最安値）。prices.json が読めなければ空dict。
+
+    価格が取れない異常時でも通知自体は止めない（価格の行だけ省く）。
+    """
+    pj = _prices_json()
+    try:
+        data = json.loads(pj.read_text(encoding="utf-8"))
+        return {a: (max(v), min(v)) for a, v in data.get("areas", {}).items() if v}
+    except Exception as e:
+        print(f"[slack] 価格データを読めませんでした（価格表示なしで通知継続）: {e}")
+        return {}
+
+
 def main():
     webhook = os.environ.get("SLACK_ALERT_WEBHOOK_URL", "").strip()
     slug = _today_slug()
@@ -84,9 +102,15 @@ def main():
     if pj.exists():
         date_label = json.loads(pj.read_text(encoding="utf-8")).get("date_label", slug)
 
+    stats = _price_stats()
+
     lines = [f"*⚡ 価格アラート発火* — 対象日 {date_label}", ""]
     for area, label, subject in items:
-        lines.append(f"• *{area}* ｜ {label}")
+        line = f"• *{area}* ｜ {label}"
+        if area in stats:
+            peak, low = stats[area]
+            line += f"：最高値 {peak:.2f}円 ／ 最安値 {low:.2f}円"
+        lines.append(line)
         if subject:
             lines.append(f"    件名: {subject}")
     lines.append("")

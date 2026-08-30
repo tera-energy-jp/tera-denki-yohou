@@ -78,11 +78,16 @@ _ADVICE = {
 }
 
 
+def build_subject(area, label, date_label):
+    """配信メールの件名。配配・Slack通知の両方でこの1箇所を使う。"""
+    return f"【テラエナジーでんき】{label}：明日 {date_label} {area}エリアの電力価格にご注意ください"
+
+
 def build_body(area, level, label, peak, peak_at, windows, date_label):
     """配配に貼り付ける 件名・本文（プレーンテキスト叩き台）を返す。"""
     yen = f"{peak:.2f}円"  # 確定値なので約なし・小数2桁（JEPX刻みと一致）
     win = "、".join(windows)  # 閾値以上の帯をすべて列挙
-    subject = f"【テラエナジーでんき】{label}：明日 {date_label} {area}エリアの電力価格にご注意ください"
+    subject = build_subject(area, label, date_label)
     body = f"""{area}エリアのお客さまへ
 
 {_HEAD[level]}
@@ -104,6 +109,8 @@ def build_body(area, level, label, peak, peak_at, windows, date_label):
 上記は JEPX（日本卸電力取引所）のエリアプライス（税抜）にもとづく確定値です。
 実際のご請求額は、このエリアプライスに送電ロスを加味し、託送料金・
 再エネ発電賦課金・容量拠出金・弊社手数料を加えて算出されます。
+※本メールは送信専用のため、ご返信いただいてもお答えできません。
+お問い合わせは customer@tera-energy.com までお願いいたします。
 
 TERA Energy株式会社　テラエナジーでんき
 """
@@ -137,21 +144,22 @@ def main():
     areas = data["areas"]
 
     # 全エリア判定
-    results = []  # (area, lv, label, peak, peak_at, windows, push)
+    results = []  # (area, lv, label, peak, peak_at, windows, push, low)
     for area, prices in areas.items():
         peak, peak_at = peak_window(prices)
+        low = min(prices)  # 日内最安値（安い時間帯へのシフト余地の目安）
         lv, label = cfg.alert_level(area, peak)
         push, _, _ = cfg.should_push_mail(area, peak)
         # 「高い時間帯」の下限は、そのエリアで顧客に知らせる基準＝注意しきい値に揃える。
         windows = high_windows(prices, cfg.NOTICE_THRESHOLDS.get(area, peak))
-        results.append((area, lv, label, peak, peak_at, windows, push))
+        results.append((area, lv, label, peak, peak_at, windows, push, low))
 
     fired = [r for r in results if r[6]]  # Lv2（注意）以上＝プッシュ対象
 
     out_dir = ALERTS_ROOT / date_slug
     if fired:
         out_dir.mkdir(parents=True, exist_ok=True)
-        for area, lv, label, peak, peak_at, windows, _ in fired:
+        for area, lv, label, peak, peak_at, windows, _, _low in fired:
             subject, body = build_body(area, lv, label, peak, peak_at, windows, date_label)
             (out_dir / f"{area}_{label}.txt").write_text(
                 f"件名: {subject}\n\n{body}", encoding="utf-8")
@@ -160,10 +168,10 @@ def main():
 
     # サマリー
     L = [f"=== 価格アラート判定  {date_label}  ({prices_path.name}) ===", ""]
-    L.append("[全エリア判定]（日内最高値・税抜エリアプライス）")
-    for area, lv, label, peak, peak_at, windows, push in results:
+    L.append("[全エリア判定]（日内最高値／最安値・税抜エリアプライス）")
+    for area, lv, label, peak, peak_at, windows, push, low in results:
         mark = "★送信" if push else "  —"
-        L.append(f"  {area:<4} 最高 {peak:>7.2f}円  Lv{lv} {label:<4} {mark}")
+        L.append(f"  {area:<4} 最高 {peak:>7.2f}円 / 最安 {low:>6.2f}円  Lv{lv} {label:<4} {mark}")
     L.append("")
     if fired:
         L.append(f"[配信対象] {len(fired)}エリア（Lv2 注意以上）")
