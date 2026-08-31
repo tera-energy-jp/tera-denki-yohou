@@ -1,259 +1,64 @@
-# でんき予報システム仕様書
+# でんき予報（tera-denki-yohou）
 
-このドキュメントは、`tera-denki-yohou-main` リポジトリ内で動作する「でんき予報」の仕組みと運用をわかりやすくまとめたものです。
+JEPX（日本卸電力取引所）の翌日スポット価格を毎朝自動で取り込み、
+**Web公開・Instagram投稿・社内向け価格アラート**の3つを自動で作って配る仕組みです。
 
----
-
-## 1. 目的
-
-このシステムは、JEPX の翌日スポット価格データを取り込み、
-
-- GitHub Pages 向け Web コンテンツ生成
-- Instagram Stories 生成・投稿
-- 価格アラート判定と通知
-
-を自動化することを目的としています。
-
-従来は手作業だった JEPX の確認から投稿までの一連の流れを、自動化しています。
+- 公開ページ：`docs/index.html`（GitHub Pages）
+- 人の手が要るのは1か所だけ：価格アラートのお客様向け配信（配配メール）は、**必ず人が中身を確認してから手動で送る**運用です
 
 ---
 
-## 2. 目次
+## 全体の流れ
 
-- 3. 主要ファイルと役割
-- 4. システム構成
-- 5. 実行フロー
-- 6. アラート判定仕様（概要）
-- 7. 監視フロー
-- 8. 運用情報
-- 9. 重要な注意点
-- 10. まとめ
+```mermaid
+flowchart TD
+    A[JEPX 公式サイト] -->|fetch_jepx.py| B[data/spot_summary.csv]
+    B -->|build_prices.py| C[prices.json 翌日分]
+    C --> F[Stories生成<br>build_stories.py → render_png.py]
+    F --> I[docs/ へコミット<br>GitHub Pages 公開]
+    C --> I
+    I --> J[Instagram Stories 投稿]
+    J --> K[docs/.last_run 記録<br>＝当日分は完了]
 
----
+    C -.-> L[価格アラート判定<br>build_alerts.py]
+    L -.->|発火時のみ| N[Drive格納＋Slack通知]
+    N -.-> P[人が確認 → 配配メールで手動送信]
 
-## 3. 主要ファイルと役割
+    K --> Q[Slackへ安否確認通知]
+```
 
-### 3.1 データ取得・変換
-
-- `scripts/fetch_jepx.py`
-  - JEPX 公式サイトから当該年度の CSV を取得し、`data/spot_summary.csv` に保存
-- `scripts/build_prices.py`
-  - `data/spot_summary.csv` から翌日の `prices.json` を生成
-- `scripts/build_history.py`
-  - 過去データを `history.json` に変換
-- `scripts/build_monthly.py`
-  - 月平均データを `monthly.json` に更新
-
-### 3.2 Web / Instagram 生成
-
-- `scripts/build_stories.py`
-  - `prices.json` を元に縦長 HTML (`stories.html`) を生成
-- `scripts/render_png.py`
-  - `stories.html` を PNG に変換し `stories_*.png` を生成
-
-### 3.3 価格アラート / 通知
-
-- `scripts/alert_config.py`
-  - 価格レベル判定の閾値とラベル定義
-- `scripts/build_alerts.py`
-  - `prices.json` から価格アラート判定と配信用素材を生成
-- `scripts/upload_alerts_drive.py`
-  - 発火物を Google Drive に格納
-- `scripts/notify_alert_slack.py`
-  - 発火状況を Slack に通知
-- `scripts/notify_slack.py`
-  - Web/Instagram 投稿の安否確認を Slack に通知
-
-### 3.4 Instagram 投稿
-
-- `scripts/post_instagram_stories.py`
-  - `docs/stories/stories_*.png` を Instagram Stories に投稿
-- `scripts/check_ig_token.py`
-  - Instagram アクセストークンの期限を監視
-
-### 3.5 GitHub Actions
-
-- `.github/workflows/daily-denki-yohou.yml`
-  - メインの自動実行フロー
-- `.github/workflows/denki-yohou-watchdog.yml`
-  - 当日未配信・遅延を監視するワークフロー
-- `.github/workflows/alert-test.yml`
-  - 価格アラートの手動テスト用
+実線＝本体フロー。点線＝補助フロー（失敗しても本体を止めない）。
+アラート系は本体と独立しており、アラート側が全滅しても Web・Instagram の配信には影響しません。
 
 ---
 
-## 4. システム構成
+## 1日のタイムライン（すべてJST）
 
-### 4.1 起動方法
+| 時刻 | 起きること |
+|---|---|
+| 〜10:30頃 | JEPXが翌日分のスポット約定結果を公表 |
+| 10:30過ぎ | **cron-job.org**（外部サービス）が本体ワークフローを起動 |
+| **10:4x** | 正常時はここまでに全処理が完了 |
+| 10:40 / 11:10 / 11:40 | GitHubネイティブcron（予備）。配信済みならスキップ |
+| 11:30 / 12:30 | 監視（watchdog）が未配信・遅延をSlackへ警告 |
 
-`daily-denki-yohou.yml`（メインの自動実行フロー）は、主に次の方法で起動します。
-
-- GitHub Actions のスケジュール実行
-  - 10:40 JST
-  - 11:10 JST
-  - 11:40 JST
-- GitHub Actions の `workflow_dispatch`
-  - 手動実行、`force=true` で強制再実行
-- `push`
-  - `data/spot_summary.csv` の更新時
-- `cron-job.org`
-  - `workflow_dispatch` を呼び出す外部 cron 運用
-
-### 4.2 重複実行防止
-
-- `docs/.last_run` を確認し、当日実行済みなら本体処理をスキップ
-- `workflow_dispatch` の `force=true` は例外で強制実行
-- `scripts/post_instagram_stories.py` は `.ig_state.json` で投稿進捗を管理し、二重送信を防止
+> ⚠️ **cron-job.orgの設定（発火時刻・PAT）はこのリポジトリに書かれていません。** 管理画面側が正です。「リポジトリを全部読んだのに発火時刻が分からない」のは正常です。
+> ⚠️ watchdogの1回目（11:30）は最後の予備cron（11:40）より**先に**走るため、⚠️警告のあと自然復旧するパターンがあります。警告が来たら慌てる前に [運用手順書](ops/runbook.md) の初動手順へ。
 
 ---
 
-## 5. 実行フロー
+## ドキュメント案内
 
-### 5.1 メイン処理
-
-`build-and-notify` ジョブで以下を順番に実行します。
-
-1. `scripts/fetch_jepx.py`
-   - JEPX から最新 CSV を取得
-2. `scripts/build_prices.py --require-tomorrow`
-   - あしたのデータを明示要求して `prices.json` を生成
-3. `scripts/build_history.py`
-   - `history.json` を生成
-4. `scripts/build_monthly.py`
-   - `monthly.json` を更新
-5. `scripts/build_stories.py`
-   - `stories.html` を生成
-6. `scripts/render_png.py stories.html`
-   - `stories_*.png` を生成
-7. `docs/` へ成果物を配置
-   - `stories_*.png` を `docs/stories/`
-   - `prices.json` と `history.json`, `monthly.json` を `docs/` にコピー
-
-### 5.2 価格アラート関連
-
-以下は本体公開とは独立して動く補助処理です。
-
-- `scripts/build_alerts.py docs/prices.json`
-  - 価格発火判定と配信用素材の生成
-- `scripts/upload_alerts_drive.py`
-  - 発火物を Google Drive に格納
-- `scripts/notify_alert_slack.py`
-  - 発火状況を Slack に通知
-
-これらは `continue-on-error: true` になっており、失敗しても主要公開フローを止めません。
-
-### 5.3 公開と Instagram 投稿
-
-1. GitHub へコミット＆プッシュ
-2. GitHub Pages 反映の確認
-   - `pages_base_url/prices.json` が今回の日付になるまで待機
-3. `scripts/check_ig_token.py`
-   - IG トークン期限をチェック
-4. `scripts/post_instagram_stories.py`
-   - Stories 画像を Instagram に投稿
-5. `docs/.last_run` を更新
-   - Instagram 投稿成功後に当日完了マーカーを記録
-6. `scripts/notify_slack.py`
-   - 最終的な安否確認通知を Slack に送信
+| 読みたいこと | 場所 |
+|---|---|
+| **仕組みを詳しく知りたい・変更を加えたい**：処理ステップの詳細、ファイル対応表、JSON仕様、データ方針 | [ops/architecture.md](ops/architecture.md) |
+| **止まった・警告が来た・運用したい**：障害時の初動、アラートの手動送信手順、過去の障害と設計理由、Secrets一覧、ローカル動作確認 | [ops/runbook.md](ops/runbook.md) |
+| 細かい仕様変更の履歴 | [scripts/軽微修正メモ.md](scripts/軽微修正メモ.md) |
 
 ---
 
-## 6. アラート判定仕様（概要）
+## さわる前に知っておくこと（3つだけ）
 
-- 閾値は `scripts/alert_config.py` で定義されています。
-  - `THRESHOLDS` : Lv1（高め） — 情報提供（Instagram＋希望者メール）
-  - `NOTICE_THRESHOLDS` : Lv2（注意） — 全顧客メール（該当エリア）を送るトリガ
-  - `WARNING_THRESHOLDS` : Lv3（警戒） — 全顧客メール＋より強い注意喚起
-  - `SEVERE_LINE` : Lv4（重大） — 絶対値（150 円/kWh）の非常事態
-
-- メール本文では、Lv2（注意）以上のときに日内最高値を `xx.xx円/kWh` で示します。
-
-### 6.1 判定ロジック
-
-- `alert_level(area, peak)` は日内最高値 `peak`（円/kWh）を受け取り、以下の順で評価してレベルを返します。
-  1. `peak >= SEVERE_LINE` → Lv4（重大）
-  2. `peak >= WARNING_THRESHOLDS[area]` → Lv3（警戒）
-  3. `peak >= NOTICE_THRESHOLDS[area]` → Lv2（注意）
-  4. `peak >= THRESHOLDS[area]` → Lv1（高め）
-  5. 上記いずれでもない → Lv0（発火なし)
-
-- `should_push_mail(area, peak)` は内部で `alert_level()` を呼び、レベルが `>= 2`（= 注意 以上）であれば `True` を返します。
-  つまり「全顧客へのメール送信」は Lv2（注意）以上がトリガです。
-
-### 6.2 補助
-
-- `HIGH_FLOOR` は表示用の5段階 `PRICE_LEVELS` から自動導出される「高め帯の下限」です。
-  - `notify_slack.py` や `build_stories.py` が「高めのエリア」を判定するときに使います。
-- `yen_approx(v)` は円表記を整形するユーティリティです（例: "約12円"）。
-
----
-
-## 7. 監視フロー
-
-`denki-yohou-watchdog.yml` は次の時間に実行されます。
-
-- 11:30 JST
-- 12:30 JST
-
-### 7.1 監視内容
-
-- `docs/.last_run` の確認
-- 当日未配信であれば Slack に警告
-- 当日配信済みでも完了が遅い場合は遅延注意を Slack に送信
-
----
-
-## 8. 運用情報
-
-### 8.1 環境変数
-
-- `SLACK_WEBHOOK_URL`
-  - Slack 通知用
-- `PAGES_BASE_URL`
-  - GitHub Pages ベース URL
-- `IG_ACCESS_TOKEN`
-  - Instagram 長期アクセストークン
-- `IG_USER_ID`
-  - Instagram Business Account ID
-
-### 8.2 ローカル実行コマンド例
-
-- `python3 scripts/fetch_jepx.py`
-- `python3 scripts/build_prices.py --require-tomorrow`
-- `python3 scripts/build_history.py --days 90`
-- `python3 scripts/build_monthly.py --rebuild`
-
-### 8.3 トラブルシューティング
-
-- CSV が見つからない
-  - `scripts/fetch_jepx.py` を実行して `data/spot_summary.csv` を生成
-- `prices.json` が生成されない
-  - `build_prices.py` の実行ログを確認し、`--require-tomorrow` の挙動を確認
-- Slack 通知が失敗する
-  - `SLACK_WEBHOOK_URL` を確認し、`python3 scripts/notify_slack.py` を実行
-- Instagram 投稿エラー
-  - `scripts/check_ig_token.py` でトークンの有効期限を確認
-
----
-
-## 9. 重要な注意点
-
-- `build_prices.py --require-tomorrow` は「翌日のデータ」を明示的に要求します。
-  - JEPX の公表遅延時に古いデータを誤配信しないためです。
-- `post_instagram_stories.py` は `.ig_state.json` で投稿済み進捗を管理し、途中失敗時の二重投稿を防ぎます。
-- 価格アラート関連は本体公開と独立しているため、アラート側の問題があっても Web/Instagram 配信は継続します。
-
----
-
-## 10. まとめ
-
-このシステムの基本的な流れは、
-
-1. JEPX CSV 取得
-2. `prices.json` 生成
-3. `history.json` / `monthly.json` 更新
-4. Web・Stories 生成
-5. 価格アラート判定
-6. GitHub Pages 公開
-7. Instagram Stories 投稿
-8. `docs/.last_run` 更新
+1. **正本データはJEPX**。このリポジトリは過去年度の生データを持ちません。過去データの改定は「推測で埋める」のではなく「JEPXから取り直す」が鉄則です。
+2. **ワークフローのガード（`continue-on-error`・`concurrency`・`force`入力など）は全部、実際に起きた事故への対策です**。消す前に [runbook の障害履歴](ops/runbook.md#過去の障害となぜガードが多いのか) を読んでください。
+3. `docs/` は**GitHub Pagesの公開ディレクトリ**です。ここに置いたものはWebに公開されます。内部資料は `ops/` へ。
