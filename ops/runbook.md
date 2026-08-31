@@ -96,7 +96,8 @@
 
 こうした経緯があるため、`continue-on-error`・`concurrency`・`if: always()` などの指定を「動作に影響なさそうだから」と安易に外さないよう注意してください。
 
-より細かい仕様変更の履歴は [scripts/軽微修正メモ.md](../scripts/軽微修正メモ.md) にも残っています（円表記の統一、しきい値の一元管理など）。
+障害とまではいかない細かい仕様変更の記録（円表記の統一、しきい値の一元管理など）は [scripts/軽微修正メモ.md](../scripts/軽微修正メモ.md) に残っています。
+
 
 ---
 
@@ -108,8 +109,8 @@ GitHubリポジトリの Settings → Secrets and variables → Actions に登�
 |---|---|---|
 | `IG_ACCESS_TOKEN` | Secret | Instagram Graph API 長期アクセストークン（**約60日で失効**。失効14日前からSlack警告が来る） |
 | `IG_USER_ID` | Secret | InstagramビジネスアカウントID |
-| `SLACK_WEBHOOK_URL` | Secret | 日々の安否確認通知・IGトークン失効警告・watchdog警告の送信先 |
-| `SLACK_ALERT_WEBHOOK_URL` | Secret | 価格アラート発火通知の送信先（安否確認とは別チャンネル） |
+| `SLACK_WEBHOOK_URL` | Secret | 日次結果通知（「☀️ 配信処理完了」）・IGトークン失効警告・watchdog警告の送信先。**実際の投稿先は #kk_でんき予報**（Webhookにチャンネルが紐づいているため、変更はSlack側のWebhook設定で行う） |
+| `SLACK_ALERT_WEBHOOK_URL` | Secret | 価格アラート発火通知の送信先（上とは別チャンネル） |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Secret | Google Drive格納用（Workload Identity・キーレス認証） |
 | `GCP_SERVICE_ACCOUNT` | Secret | 同上 |
 | `ALERT_DRIVE_PARENT_ID` | Secret | アラート発火物を格納するGoogle Driveフォルダの親ID |
