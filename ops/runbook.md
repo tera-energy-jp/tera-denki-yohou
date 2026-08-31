@@ -29,7 +29,7 @@
 
 ### ② 公開ページの `prices.json` の日付を見る
 
-Webだけ今日の日付に更新されていたら、**Instagram投稿だけが失敗した**パターンです。完了マーカーはIG投稿の成功後にしか書かれないので、watchdogからは「未配信」に見えます。
+Webだけ今日の日付に更新されていたら、**Instagram投稿だけが失敗した**パターンです。完了マーカーはInstagram投稿の成功後にしか書かれないので、watchdogからは「未配信」に見えます。
 
 `.ig_state.json` を見れば何枚目まで投稿できたか分かります。トークン切れが疑われるときは `check_ig_token.py` のログも確認してください。
 
@@ -45,7 +45,7 @@ Webだけ今日の日付に更新されていたら、**Instagram投稿だけが
 
 Actionsから `daily-denki-yohou.yml` を手動実行し、`force=true` を指定します。`force` なしだと配信済みガードでスキップされます。
 
-ただしIG投稿の途中失敗からの再開なら、`force` は不要です。`.ig_state.json` が進捗を持っているので、通常の再実行で残りの枚数だけが投稿されます。
+ただしInstagram投稿の途中失敗からの再開なら、`force` は不要です。`.ig_state.json` が進捗を持っているので、通常の再実行で残りの枚数だけが投稿されます。
 
 ---
 
@@ -84,7 +84,7 @@ Actionsから `daily-denki-yohou.yml` を手動実行し、`force=true` を指�
 
 **最後のリトライ（12:45）の結果は、watchdogが見ていません。** 12:45以降にwatchdogは走らないので、ここで成否を知らせるのは本体の完了通知（`notify_slack.py`）だけです。12:30の⚠️が最後の警告になるため、**その後に完了通知が来たかどうか**を必ず確認してください。
 
-**Webは公開済みなのに「未配信」扱いになることがある。** 完了マーカーはInstagram投稿の成功後にしか書かれません。Web公開まで成功していてIG投稿だけ失敗した日は、watchdog上は未配信のままです。
+**Webは公開済みなのに「未配信」扱いになることがある。** 完了マーカーはInstagram投稿の成功後にしか書かれません。Web公開まで成功していてInstagram投稿だけ失敗した日は、watchdog上は未配信のままです。
 
 > 💡 噛み合わせを直すなら、watchdogを12:00と13:00（各リトライの15分後）にずらすのが素直です。そうすればリトライ結果を見てから警告できるので、⚠️の空振りが減ります。現状は「多少の空振りより当日中に気づけること」を優先した割り切りなので、変更する場合は `denki-yohou-watchdog.yml` のcronと、cron-job.org 側の設定を両方見比べて決めてください。
 
@@ -157,7 +157,7 @@ GitHubの Settings → Secrets and variables → Actions に登録が必要な�
 |---|---|---|
 | `IG_ACCESS_TOKEN` | Secret | Instagram Graph API の長期トークン。**約60日で失効**し、14日前から警告が出る |
 | `IG_USER_ID` | Secret | InstagramビジネスアカウントID |
-| `SLACK_WEBHOOK_URL` | Secret | 日次結果・IGトークン警告・watchdog警告の送信先。投稿先は **#kk_でんき予報** |
+| `SLACK_WEBHOOK_URL` | Secret | 日次結果・Instagramトークン警告・watchdog警告の送信先。投稿先は **#kk_でんき予報** |
 | `SLACK_ALERT_WEBHOOK_URL` | Secret | 価格アラート発火通知の送信先（上とは別チャンネル） |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | Secret | Google Drive格納用（キーレス認証） |
 | `GCP_SERVICE_ACCOUNT` | Secret | 同上 |
