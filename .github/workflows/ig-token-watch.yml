@@ -1,0 +1,179 @@
+name: IGトークン 有効性監視
+
+# 目的：
+#   IG_ACCESS_TOKEN の失効を「投稿が止まる前」に検知する。
+#
+#   既存の denki-yohou-watchdog.yml は .last_run を見る仕組みなので、
+#   検知できるのは「配信が止まった後」。2026/7/4 の cron-job.org PAT 期限切れ、
+#   2026/9/26 の IG トークン期限切れは、どちらも「期限があるものを誰も見ていない」
+#   という同じ構造で起きている。ここを事前警告で塞ぐ。
+#
+# 仕組み：
+#   - 毎朝 09:00 JST（本配信 10:4x の約2時間前）にトークンを検査
+#   - IG_APP_ID / IG_APP_SECRET があれば debug_token で is_valid と残日数を見る
+#   - 無ければ Graph API を1回叩くだけの生存確認にフォールバック
+#   - 異常なときだけ Slack に出す（正常時は無言）
+#
+# 必要なシークレット：
+#   IG_ACCESS_TOKEN   … 既存
+#   IG_USER_ID        … 既存
+#   SLACK_WEBHOOK_URL … 既存
+#   IG_APP_ID         … 任意（あれば残日数まで見る）
+#   IG_APP_SECRET     … 任意（同上）
+#
+# 注意：
+#   トークンの値はログに一切出さない。出力するのは種別・有効性・残日数だけ。
+
+on:
+  schedule:
+    - cron: '0 0 * * *'    # 09:00 JST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-token:
+    runs-on: ubuntu-latest
+    steps:
+      - name: トークンの有効性を確認して必要ならSlackへ
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_APP_ID: ${{ secrets.IG_APP_ID }}
+          IG_APP_SECRET: ${{ secrets.IG_APP_SECRET }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.parse, urllib.request
+
+          API   = "https://graph.facebook.com/v21.0"
+          TOKEN = os.environ.get("IG_ACCESS_TOKEN", "")
+          IGID  = os.environ.get("IG_USER_ID", "")
+          APPID = os.environ.get("IG_APP_ID", "")
+          APPSEC= os.environ.get("IG_APP_SECRET", "")
+          HOOK  = os.environ.get("SLACK_WEBHOOK_URL", "")
+          REPO  = os.environ.get("REPO", "")
+
+          ACTIONS_URL = f"https://github.com/{REPO}/actions"
+          WARN_DAYS, CRIT_DAYS = 14, 3
+
+          def get(path, params):
+              url = f"{API}/{path}?" + urllib.parse.urlencode(params)
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as r:
+                      return json.loads(r.read().decode()), None
+              except urllib.error.HTTPError as e:
+                  try:
+                      return None, json.loads(e.read().decode()).get("error", {})
+                  except Exception:
+                      return None, {"message": f"HTTP {e.code}"}
+              except Exception as e:
+                  return None, {"message": str(e)}
+
+          def slack(text):
+              if not HOOK:
+                  print("SLACK_WEBHOOK_URL が無いので送信をスキップ")
+                  return
+              req = urllib.request.Request(
+                  HOOK,
+                  data=json.dumps({"text": text}).encode(),
+                  headers={"Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  r.read()
+
+          def die(msg):
+              slack(msg)
+              sys.exit(1)
+
+          if not TOKEN:
+              die(f"🚨 *IGトークン監視*\nIG_ACCESS_TOKEN が設定されていません。\n{ACTIONS_URL}")
+
+          # ── A. アプリ資格情報があれば debug_token で詳しく見る ──────────────
+          if APPID and APPSEC:
+              data, err = get("debug_token", {
+                  "input_token": TOKEN,
+                  "access_token": f"{APPID}|{APPSEC}",
+              })
+              if err:
+                  die("🚨 *IGトークン監視：debug_token が失敗*\n"
+                      f"`{err.get('message','(不明)')}`\n"
+                      "IG_APP_ID / IG_APP_SECRET が正しいか確認してください。\n"
+                      f"{ACTIONS_URL}")
+
+              d = data.get("data", {})
+              ttype   = d.get("type", "?")
+              valid   = d.get("is_valid", False)
+              expires = d.get("expires_at", None)
+              scopes  = d.get("scopes", [])
+
+              if not valid:
+                  die("🚨 *IGトークン失効：でんき予報の投稿が止まります*\n"
+                      f"IG_ACCESS_TOKEN が無効化されています（種別 {ttype}）。\n"
+                      f"理由: `{d.get('error',{}).get('message','(不明)')}`\n"
+                      "→ 手順書『Instagram アクセストークン更新手順書』に従って再発行してください。\n"
+                      f"{ACTIONS_URL}")
+
+              need = {"instagram_basic", "instagram_content_publish"}
+              missing = need - set(scopes)
+              if missing:
+                  slack("⚠️ *IGトークン監視：権限が足りません*\n"
+                        f"不足: `{', '.join(sorted(missing))}`\n"
+                        "投稿時に code 200 で失敗する可能性があります。\n"
+                        f"{ACTIONS_URL}")
+
+              # データアクセス期限：トークンの有効期限とは別枠。
+              # これを過ぎると is_valid=true のまま API が空/制限された応答を返すことがある。
+              # 発行者が一度ログインし直すとリセットされる（90日）。
+              dae = d.get("data_access_expires_at") or 0
+              if dae:
+                  dae_days = (dae - int(time.time())) / 86400
+                  print(f"データアクセス期限まで {dae_days:.1f} 日")
+                  if dae_days <= 0:
+                      slack("🚨 *IGトークン：データアクセス期限が切れています*\n"
+                            "トークン自体は有効ですが、API が空の応答を返す可能性があります。\n"
+                            "→ Graph APIエクスプローラで発行者が一度ログインし直すとリセットされます。\n"
+                            f"{ACTIONS_URL}")
+                  elif dae_days <= WARN_DAYS:
+                      slack("⚠️ *IGトークン：データアクセス期限が近づいています*\n"
+                            f"残り *{dae_days:.0f} 日*。トークンの有効期限とは別枠の期限です。\n"
+                            "→ Graph APIエクスプローラで発行者が一度ログインし直すとリセットされます。\n"
+                            f"{ACTIONS_URL}")
+
+              if expires in (0, None):
+                  print(f"OK: 種別 {ttype} / 無期限 / 有効。何もしません。")
+                  sys.exit(0)
+
+              days = (expires - int(time.time())) / 86400
+              print(f"種別 {ttype} / 残り {days:.1f} 日")
+
+              if days <= CRIT_DAYS:
+                  die("🚨 *IGトークンの期限が迫っています*\n"
+                      f"残り *{days:.1f} 日*（種別 {ttype}）。このままだと投稿が止まります。\n"
+                      "→ 無期限のページトークンへの切替を推奨。手順書を参照。\n"
+                      f"{ACTIONS_URL}")
+              if days <= WARN_DAYS:
+                  slack("⚠️ *IGトークンの期限が近づいています*\n"
+                        f"残り *{days:.0f} 日*（種別 {ttype}）。\n"
+                        "ユーザートークンのままです。無期限のページトークンに切り替えると"
+                        "この作業自体が不要になります。\n"
+                        f"{ACTIONS_URL}")
+              sys.exit(0)
+
+          # ── B. 資格情報が無いときの生存確認 ────────────────────────────────
+          print("IG_APP_ID / IG_APP_SECRET が無いため、生存確認のみ行います。")
+          if not IGID:
+              die(f"🚨 *IGトークン監視*\nIG_USER_ID が設定されていません。\n{ACTIONS_URL}")
+
+          data, err = get(IGID, {"fields": "id,username", "access_token": TOKEN})
+          if err:
+              die("🚨 *IGトークンが使えません：でんき予報の投稿が止まります*\n"
+                  f"`code {err.get('code','?')} / subcode {err.get('error_subcode','-')}: "
+                  f"{err.get('message','(不明)')}`\n"
+                  "→ 手順書『Instagram アクセストークン更新手順書』の切り分け表を参照。\n"
+                  f"{ACTIONS_URL}")
+
+          print(f"OK: IGアカウント {data.get('username','?')} に到達できました。何もしません。")
+          PY
