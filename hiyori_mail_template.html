@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="format-detection" content="telephone=no">
+<title>でんき日和</title>
+</head>
+<!--
+  でんき日和（安値のお知らせ）HTMLメールテンプレ
+  ─────────────────────────────────────────
+  build_hiyori.py が {{ }} を差し込み、発火エリアごとに .html を生成する。
+  メールクライアント互換のため table レイアウト＋インラインCSS。max-width 600px。
+  価格アラートと同じく配信停止なし（該当エリア全員固定）＝解除リンクを置かない。
+
+  色は高値アラート（暖色・注意/警戒/重大）と対になるよう、TERAブランドの
+  ブルー #6496C8（ロゴのフィラメント）を基調にしている。ひと目で
+  「これは良い知らせのほう」と分かるようにするため。
+
+  差し込みプレースホルダ:
+    {{THEME_COLOR}}      基調色（#6496C8）
+    {{AREA}}             エリア名
+    {{DATE}}             対象日（例: 2026年4月18日(土)）
+    {{HEAD}}             リード文
+    {{ADVICE}}           使い方の提案
+    {{CHEAP_TIME}}       安い時間帯（例: 10:00 〜 15:30）
+    {{CHEAP_DURATION}}   継続時間（例: 5時間30分）
+    {{CHEAP_AVG}}        その時間帯の平均単価（例: 約0.4円）
+    {{OTHER_WINDOWS}}    2本目以降の安値帯（無ければ空文字）
+-->
+<body style="margin:0; padding:0; background-color:#F5F0E9; -webkit-text-size-adjust:100%;">
+
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">
+    {{AREA}}エリア {{DATE}}は {{CHEAP_TIME}} に電気が安くなります。
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F0E9;">
+    <tr>
+      <td align="center" style="padding:20px 12px;">
+
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%; max-width:600px; background-color:#FFFFFF; border-radius:16px; overflow:hidden; font-family:'Hiragino Sans','Yu Gothic UI','Noto Sans JP',sans-serif;">
+
+          <!-- ヘッダー -->
+          <tr>
+            <td style="background-color:{{THEME_COLOR}}; padding:20px 24px;">
+              <div style="font-size:13px; color:#FFFFFF; letter-spacing:.12em; font-weight:bold;">でんき日和</div>
+              <div style="font-size:21px; color:#FFFFFF; font-weight:bold; padding-top:4px;">明日は電気が安い時間があります</div>
+              <div style="font-size:14px; color:#FFFFFF; padding-top:2px; opacity:.95;">{{DATE}} ｜ {{AREA}}エリア</div>
+            </td>
+          </tr>
+
+          <!-- リード文 -->
+          <tr>
+            <td style="padding:22px 24px 4px; font-size:15px; color:#4A4440; line-height:1.8;">
+              {{AREA}}エリアのお客さまへ<br>{{HEAD}}
+            </td>
+          </tr>
+
+          <!-- 安い時間帯（主役） -->
+          <tr>
+            <td align="center" style="padding:14px 24px 4px;">
+              <div style="font-size:12px; color:#8A8178;">安くなる時間帯</div>
+              <div style="font-size:30px; color:{{THEME_COLOR}}; font-weight:bold; line-height:1.25; padding-top:2px;">{{CHEAP_TIME}}</div>
+              <div style="font-size:15px; color:{{THEME_COLOR}}; font-weight:bold; padding-top:2px;">{{CHEAP_DURATION}}つづきます</div>
+            </td>
+          </tr>
+
+          <!-- 平均単価 -->
+          <tr>
+            <td style="padding:12px 24px 4px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F0E9; border-radius:12px;">
+                <tr><td style="padding:14px 18px;">
+                  <span style="font-size:12px; color:#8A8178;">この時間帯の平均（JEPXエリアプライス）</span><br>
+                  <span style="font-size:18px; color:{{THEME_COLOR}}; font-weight:bold;">{{CHEAP_AVG}}/kWh</span><br>
+                  <span style="font-size:12px; color:#8A8178;">{{OTHER_WINDOWS}}</span>
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- 使い方の提案 -->
+          <tr>
+            <td style="padding:12px 24px 4px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FBF6E8; border-radius:12px;">
+                <tr><td style="padding:16px 18px; font-size:14px; color:#4A4440; line-height:1.7;">
+                  💡 {{ADVICE}}
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td align="center" style="padding:20px 24px 6px;">
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr><td style="background-color:{{THEME_COLOR}}; border-radius:12px;">
+                  <a href="https://tera-energy-jp.github.io/tera-denki-yohou/" style="display:inline-block; padding:14px 30px; font-size:15px; color:#FFFFFF; font-weight:bold; text-decoration:none;">30分ごとの価格推移を見る</a>
+                </td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:2px 24px 22px; font-size:12px; color:#8A8178;">
+              tera-energy-jp.github.io/tera-denki-yohou
+            </td>
+          </tr>
+
+          <!-- フッター（配信停止リンクなし＝該当エリア全員へ） -->
+          <tr>
+            <td style="background-color:#F5F0E9; padding:20px 24px; font-size:11px; color:#8A8178; line-height:1.8;">
+              このメールは、市場連動プランをご契約のお客さまに、電気料金に関わる価格情報としてお送りしています（広告メールではありません）。<br>
+              上記はJEPX（日本卸電力取引所）のエリアプライス（税抜）にもとづく確定値です。実際のご請求額は、このエリアプライスに送電ロスを加味し、託送料金・再エネ発電賦課金・容量拠出金・弊社手数料を加えて算出されます。安い時間帯にお使いいただいても、基本料金や各種賦課金は変わらずかかります。<br>
+              ※本メールは送信専用のため、ご返信いただいてもお答えできません。お問い合わせは <a href="mailto:customer@tera-energy.com" style="color:#8A8178;">customer@tera-energy.com</a> までお願いいたします。<br><br>
+              TERA Energy株式会社　テラエナジーでんき<br>
+              〒615-0854 京都府京都市右京区西京極堤外町18-124
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>
