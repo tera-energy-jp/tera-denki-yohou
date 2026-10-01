@@ -115,6 +115,14 @@ jobs:
         env:
           ALERT_OUT_DIR: ${{ github.workspace }}/_alerts_out
         run: python scripts/build_alerts.py docs/prices.json
+      - name: ④-A' でんき日和（安値）判定＆本文生成（発火時のみ。高値と同じフォルダへ）
+        # 高値アラートと独立したスクリプト。判定のたびに data/low_history.json へ当日分を追記する。
+        # 同日に高値が出たエリアは高値を優先して日和を見送る（build_hiyori.py 側で判定）。
+        # 出力は <エリア>_日和.html/.txt。④-B〜④-D が同じフォルダを拾い、Drive格納＆Slack通知される。
+        continue-on-error: true
+        env:
+          ALERT_OUT_DIR: ${{ github.workspace }}/_alerts_out
+        run: python scripts/build_hiyori.py docs/prices.json
       - name: ④-B Google Cloud 認証（Workload Identity・キーレス）
         continue-on-error: true
         uses: google-github-actions/auth@v2
@@ -137,7 +145,7 @@ jobs:
         run: |
           git config user.name  "tera-denki-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add docs/ data/spot_summary.csv
+          git add docs/ data/spot_summary.csv data/low_history.json
           git diff --cached --quiet && echo "変更なし（スキップ）" \
             || git commit -m "でんき予報 $(TZ=Asia/Tokyo date +%Y-%m-%d) [skip ci]"
           git push origin HEAD:main \
